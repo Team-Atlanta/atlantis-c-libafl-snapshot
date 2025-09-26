@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package LLMMutator;
+
+enum MutateMode {
+    GENONLY = 0;
+    MUTATEONLY = 1;
+}
+
+enum Status {
+    SUCCESS = 0;
+    FAILURE = 1;
+}
+
+message CodeLocation {
+    string file_path = 1;
+    int32 line_number = 2;
+    int32 column_number = 3;
+    string content = 4;
+}
+
+message MutateRequest {
+    string oss_fuzz_path = 1;
+    string cp_name = 2;
+    string cp_src_path = 3;
+    string output_path = 4;
+    string fuzzer_binary_path = 5;
+    map<string, string> harnesses = 6;
+    MutateMode mode = 7;
+    string blob_path = 8;
+    CodeLocation fuzzing_blocker = 9;
+}
+
+message MutateResponse {
+    Status status = 1;
+    string output_path = 2;
+    string aux = 3;
+}
+
+service LLMMutator {
+    rpc Mutate(MutateRequest) returns (MutateResponse) {}
+}

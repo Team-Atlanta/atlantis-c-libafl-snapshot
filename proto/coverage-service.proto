@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package coverage_service;
+
+message FuzzerSeedRequest {
+    string campaign_id = 1;
+    string harness_id = 2;
+}
+
+message FuzzerSeedUpdate {
+    string campaign_id = 1;
+    string harness_id = 2;
+    string seed_name = 3;
+    bool is_interesting = 4;
+    bytes data = 5;
+}
+
+message IndividualScope {
+    string seed_name = 1;
+}
+
+message AggregateScope {
+}
+
+message AnnotatedSourceCodeConfig {
+    // TODO: how do you specify "no whitelist" with this interface?
+    // Special-casing passing an empty whitelist feels wrong. Should
+    // probably be done in some other way
+    repeated string source_paths_whitelist = 1;
+}
+
+message JsonConfig {
+    // This determines whether or not the `-summary-only` flag
+    // (https://llvm.org/docs/CommandGuide/llvm-cov.html#cmdoption-llvm-cov-export-summary-only)
+    // is passed to `llvm-cov export`.
+    // Program- and file-level summary statistics will always be
+    // included in the JSON. If "detailed measurements" are enabled,
+    // info about individual branches will also be included. This
+    // massively increases the size of the JSON (something like ~100 KB
+    // to ~100 MB).
+    bool include_detailed_measurements = 1;
+}
+
+message ProfdataConfig {
+}
+
+message CoverageRequest {
+    string nonce = 1;
+    string campaign_id = 2;
+    string harness_id = 3;
+    oneof scope {
+        IndividualScope individual = 4;
+        AggregateScope aggregate = 5;
+    }
+    /* optional */ AnnotatedSourceCodeConfig annotated_source_code_config = 6;
+    /* optional */ JsonConfig json_config = 9;
+    /* optional */ ProfdataConfig profdata_config = 7;
+    string output_directory = 8;
+    // Contents of output directory:
+    // - annotated project source code files (if annotated_source_code_config provided)
+    // - coverage.json (if json_config provided)
+    // - coverage.profdata (if profdata_config provided)
+}
+
+message CoverageResponse {
+    string nonce = 1;
+    bool success = 2;
+}

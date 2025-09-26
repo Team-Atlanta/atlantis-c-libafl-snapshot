@@ -1,0 +1,31 @@
+syntax = "proto3";
+ 
+package SarifResults;
+  
+message SarifHarnessReachability {
+    // this should indicate which harnesses to turn off. Controller should keep track of harnesses.
+    repeated string harness_ids = 1;
+}
+
+message StringList {
+    repeated string values = 1;
+}
+
+// keep old one in case
+message LibSarifHarnessReachability {
+    // this should indicate which harnesses to turn off. Controller should keep track of harnesses.
+    map<string, StringList> location_harnesses_disabled = 1;
+}
+
+message SarifDirected {
+    // filename:linum format
+    string location = 1;
+    // reachable harness
+    string harness_id = 2;
+    string sarif_id = 3;
+}
+
+message DeltaDirected {
+    // filename:linum format
+    repeated string locations = 1;
+}

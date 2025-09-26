@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package DeepGen;
+
+enum RequestType{
+    START = 0;
+    STOP = 1;
+}
+
+message DeepGenRequest {
+    RequestType msg_type = 1;
+    repeated int32 cores = 2;
+    string cp_name = 3;
+    string oss_fuzz_path = 4;
+    string cp_src_path = 5;
+    string mode = 6;
+    string cp_mount_path = 7;
+}

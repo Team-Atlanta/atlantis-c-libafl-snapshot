@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package HarnessBuilder;
+
+enum Mode {
+    LIBAFL = 0;
+    CUSTOM = 1;
+    SYMCC = 2;
+    SYMCC_CLANG_COV = 3;
+    SINGLE_INPUT = 4;
+    SINGLE_INPUT_SBCC = 5;
+    LIBFUZZER = 6;
+    DIRECTED = 7; // produces directed .bc and link flags
+    LIBFUZZER_SBCC = 8;
+    AFL = 9;
+    HONGGFUZZ = 10; // unused atm
+    CONFIG_GEN = 11;
+    UBSAN = 12;
+    MSAN = 13;
+    SANS = 14;
+    OPTIMIZED = 15;
+}
+
+enum Status {
+    SUCCESS = 0;
+    FAILURE = 1;
+}
+
+message BuildRequest {
+    string nonce = 1;
+    string oss_fuzz_path = 2;
+    string cp_name = 3;
+    string cp_src_path = 4;
+    Mode mode = 5;
+    string aux = 6;
+    int32 node_idx = 7;
+}
+
+message BuildRequestResponse {
+    string nonce = 1;
+    Status status = 2;
+    map<string, string> harnesses = 3;
+    string aux = 4;
+    string cp_mount_path = 5;
+    Mode mode = 6;
+    int32 node_idx = 7;
+}

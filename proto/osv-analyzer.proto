@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package OSVAnalyzer;
+
+message OSVAnalyzerResult {
+    repeated string corpus_files = 1;
+    repeated string dictionary_files = 2;
+    repeated string project_names = 3;
+    string cp_src_path = 4;
+}

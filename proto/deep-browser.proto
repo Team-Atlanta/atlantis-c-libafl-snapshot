@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package DeepBrowser;
+
+enum Status {
+    SUCCESS = 0;
+    FAILURE = 1;
+}
+
+message DeepBrowserRequest {
+    string oss_fuzz_path = 1;
+    string cp_name = 2;
+    string cp_src_path = 3;
+    string harness_id = 4;
+    string mode = 5;
+}

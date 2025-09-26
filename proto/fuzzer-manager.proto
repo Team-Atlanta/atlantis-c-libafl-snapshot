@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package FuzzerManager;
+
+enum Status {
+    SUCCESS = 0;
+    FAILURE = 1;
+}
+
+enum FuzzerResponseStage {
+    FUZZER_INIT = 0;
+    FUZZER_RUN = 1;
+}
+
+message FuzzerBinaries {
+    string libafl = 1;
+    string single_input = 2;
+    string single_input_sbcc = 3;
+    string libfuzzer = 4;
+    string libfuzzer_sbcc = 5;
+    string afl = 6;
+    string honggfuzz = 7;
+    string ubsan = 8;
+    string msan = 9;
+    string sans = 10;
+}
+
+message FuzzerRunRequest {
+    repeated string corpus_files = 1;
+    repeated string dictionary_files = 2;
+    string nonce = 3;
+    FuzzerBinaries binary_paths = 4;
+    string harness_id = 5;
+    int32 node_idx = 6;
+    repeated int32 cores = 7;
+    string cp_name = 8;
+    string oss_fuzz_path = 9;
+    string cp_src_path = 10;
+    string cp_mount_path = 11;
+    string output_path = 12;
+    string task_id = 13; 
+    string mode = 14; // importing from harness-builder is too cumbersome
+    int32 epoch_expiry = 15;
+}
+
+message FuzzerRunResponse {
+    Status status = 1;
+    string fuzzer_session_id = 2;
+    string harness_id = 3;
+    int32 node_idx = 4;
+    repeated int32 cores = 5;
+    string aux = 6;
+    string mode = 7;
+    FuzzerResponseStage stage = 8;
+    int32 time_left = 9;
+}
+
+message FuzzerStopRequest {
+    string fuzzer_session_id = 1;
+    int32 node_idx = 2;
+    string harness_id = 3;
+}
+
+message FuzzerStopResponse {
+    Status status = 1;
+    string fuzzer_session_id = 2;
+    string aux = 3;
+    string harness_id = 4;
+    int32 node_idx = 5;
+}
+
+message FuzzerLaunchAnnouncement {
+    string cp_name = 1;
+    string harness_id = 2;
+    string oss_fuzz_path = 3;
+    string cp_src_path = 4;
+    string docker_image_name = 5;
+    FuzzerBinaries binary_paths = 6;
+    string cp_mount_path = 7;
+    string nonce = 8;
+    int32 node_idx = 9;
+    string mode = 10;
+    repeated string crashes_paths = 11;
+    repeated string corpus_paths = 12;
+}
+
+message HarnessPrioritization {
+    bool enable = 1;
+    string harness_id = 2;
+}
+
+service FuzzerWrapper {
+    rpc RunFuzzer(FuzzerRunRequest) returns (FuzzerRunResponse) {}
+    rpc StopFuzzer(FuzzerStopRequest) returns (FuzzerStopResponse) {}
+}

@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package CustomFuzzer;
+
+enum Status {
+    SUCCESS = 0;
+    FAILURE = 1;
+}
+
+message CustomFuzzerRunRequest {
+    repeated string project_names = 1;
+    string cp_name = 2;
+    string cp_src_path = 3;
+    string oss_fuzz_path = 4;
+    int32 node_idx = 5;
+    repeated int32 cores = 6;
+}
+
+message CustomFuzzerRunResponse {
+    Status status = 1;
+    string fuzzer_session_id = 2;
+    int32 node_idx = 3;
+    repeated int32 cores = 4;
+    string crashes_path = 5;
+    string corpus_path = 6;
+    repeated string harness_ids = 7;
+    string aux = 8;
+}
+
+message CustomFuzzerStopRequest {
+    string fuzzer_session_id = 1;
+    int32 node_idx = 2;
+}
+
+message CustomFuzzerStopResponse {
+    Status status = 1;
+    int32 node_idx = 2;
+    repeated int32 cores = 3;
+    string aux = 4;
+}
+
+service CustomFuzzer {
+    rpc RunCustomFuzzer(CustomFuzzerRunRequest) returns (CustomFuzzerRunResponse) {}
+    rpc StopCustomFuzzer(CustomFuzzerStopRequest) returns (CustomFuzzerStopResponse) {}
+}

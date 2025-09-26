@@ -1,0 +1,7 @@
+/target
+/cc_wrapper
+/cxx_wrapper
+/*.txt
+/test
+/*.a
+/*.profraw

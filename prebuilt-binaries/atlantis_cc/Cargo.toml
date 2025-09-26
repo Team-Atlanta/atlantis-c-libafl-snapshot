@@ -1,0 +1,20 @@
+[package]
+name = "atlantis_cc"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "cc_wrapper"
+path = "src/cc_wrapper.rs"
+
+[[bin]]
+name = "cxx_wrapper"
+path = "src/cxx_wrapper.rs"
+
+[dependencies]
+file-lock = "2.1.11"
+libafl_cc = { path = "../LibAFL/libafl_cc/" }
+pathsearch = "0.2.0"
+tempfile = "3.13.0"
+walkdir = "2.5.0"
+which = "6.0"

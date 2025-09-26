@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package Bootstrap;
+
+message CPConfig {
+    string oss_fuzz_path = 1;
+    string cp_name = 2;
+    string cp_src_path = 3;
+    string mode = 4;
+    string task_id = 5;
+    int32 deadline = 6;
+}
+
+message Hello {
+    int32 node_idx = 1;
+}
+
+message FileWrite {
+    string file_path = 1;
+    bytes content = 2;
+}
+
+message ExtractTar {
+    string tarball = 1;
+    string destination = 2;
+}
+
+message FileOps {
+    repeated FileWrite writes = 1;
+    repeated ExtractTar extractions = 2;
+}
+
+message FileOpsResponse {
+    repeated FileWrite writes = 1;
+    repeated ExtractTar extractions = 2;
+    int32 node_idx = 3;
+}

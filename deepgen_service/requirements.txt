@@ -1,0 +1,153 @@
+# ==========================================
+# FOCUSED PYTHON FUZZING DEPENDENCIES
+# ONLY for: Fuzzer Generation + Data Crafting + Data Mutation
+# Removed: dev tools, monitoring, CLI, config, package mgmt
+# ==========================================
+
+# ===== CORE FUZZING FRAMEWORK =====
+hypothesis>=6.0.0                 # Property-based testing and data generation
+faker>=18.0.0                     # Generate realistic fake data
+
+# ===== BINARY DATA MANIPULATION =====
+# Built-in: struct, binascii, base64, hashlib, hmac, secrets, random
+pwntools>=4.8.0                   # Binary exploitation and data crafting
+capstone>=4.0.2                   # Disassembly for understanding binaries
+pefile>=2023.2.0                  # PE executable analysis and manipulation
+pyelftools>=0.29                  # ELF executable analysis and manipulation
+python-magic>=0.4.27             # File type detection for data generation
+
+# ===== FILE FORMAT GENERATION =====
+# Image Formats (for image processing C/C++ libs)
+Pillow>=9.5.0                     # Generate/mutate PNG, JPEG, GIF, BMP, TIFF
+imageio>=2.28.0                   # Scientific image formats
+opencv-python>=4.7.0             # Computer vision formats
+
+# Document Formats (for document processing C/C++ libs)
+pypdf>=3.8.0                      # Generate/mutate PDF files
+python-docx>=0.8.11              # Microsoft Word documents
+openpyxl>=3.1.2                   # Excel XLSX files
+xlwt>=1.3.0                       # Excel XLS files (write)
+xlrd>=2.0.1                       # Excel XLS files (read)
+
+# Archive & Compression (for archive C/C++ libs)
+patool>=1.12.0                    # Universal archive manipulation
+py7zr>=0.20.5                     # 7zip archives
+
+# Font Files (for font processing C/C++ libs)
+fonttools>=4.39.4                 # Font file generation and mutation
+brotli>=1.0.9                     # Brotli compression (for WOFF2)
+
+# Configuration & Data Formats
+pyyaml>=6.0                       # YAML data generation
+toml>=0.10.2                      # TOML configuration files
+
+# ===== MULTIMEDIA DATA GENERATION =====
+# Audio (for audio processing C/C++ libs)
+mutagen>=1.46.0                   # Audio metadata manipulation
+pydub>=0.25.1                     # Audio processing and generation
+soundfile>=0.12.1                # Audio file I/O
+
+# Video (for video processing C/C++ libs)  
+moviepy>=1.0.3                    # Video editing and generation
+av>=10.0.0                        # PyAV (libav/ffmpeg) formats
+
+# ===== NETWORK PROTOCOL CRAFTING =====
+scapy>=2.5.0                      # Packet crafting and manipulation
+impacket>=0.10.0                  # Network protocol implementations
+netaddr>=0.8.0                    # IP address manipulation
+dnspython>=2.3.0                  # DNS record crafting
+websockets>=11.0.3               # WebSocket data generation
+requests>=2.31.0                  # HTTP request crafting
+aiohttp>=3.8.4                    # Async HTTP data generation
+urllib3>=2.0.2                    # Advanced HTTP manipulation
+
+# ===== CRYPTOGRAPHIC DATA GENERATION =====
+cryptography>=41.0.0             # Modern crypto primitives
+pycryptodome>=3.17.0             # Comprehensive crypto library
+ecdsa>=0.18.0                     # Elliptic curve cryptography  
+pyopenssl>=23.1.1                # OpenSSL wrapper for cert generation
+asn1crypto>=1.5.1                # ASN.1 parsing and generation
+bcrypt>=4.0.1                     # Password hashing
+pyjwt>=2.7.0                     # JSON Web Tokens
+
+# ===== DATA SERIALIZATION =====
+protobuf>=4.23.1                  # Protocol Buffers
+msgpack>=1.0.5                    # MessagePack serialization
+cbor2>=5.4.6                      # CBOR serialization
+bson>=0.5.10                      # BSON (Binary JSON)
+avro>=1.11.1                      # Apache Avro
+pyarrow>=12.0.0                   # Apache Arrow
+orjson>=3.8.14                   # Fast JSON library
+ujson>=5.7.0                     # Ultra-fast JSON
+jsonschema>=4.17.3               # JSON schema for validation
+dill>=0.3.6                      # Enhanced pickle for object mutation
+
+# ===== DATABASE DATA GENERATION =====
+psycopg2-binary>=2.9.6           # PostgreSQL data generation
+PyMySQL>=1.0.3                    # MySQL data generation
+pymongo>=4.3.3                    # MongoDB document generation
+redis>=4.5.5                      # Redis command generation
+sqlalchemy>=2.0.13               # SQL query generation
+
+# ===== XML/HTML DATA GENERATION =====
+lxml>=4.9.2                      # XML/HTML generation and mutation
+beautifulsoup4>=4.12.2           # HTML parsing and manipulation
+defusedxml>=0.7.1                # Safe XML parsing
+html5lib>=1.1                    # HTML5 generation
+
+# ===== TEXT PROCESSING & MUTATION =====
+regex>=2023.5.5                  # Advanced regex for text mutation
+chardet>=5.1.0                   # Character encoding detection
+charset-normalizer>=3.1.0       # Character set normalization
+unidecode>=1.3.6                 # Unicode to ASCII conversion
+ftfy>=6.1.1                      # Text encoding repair
+python-levenshtein>=0.21.0      # String similarity and mutation
+
+# ===== MATHEMATICAL DATA GENERATION =====
+numpy>=1.24.3                    # Numerical array generation
+scipy>=1.10.1                    # Scientific computing data
+pandas>=2.0.2                    # DataFrame generation
+sympy>=1.12                      # Symbolic math expression generation
+numexpr>=2.8.4                   # Fast numerical expressions
+
+# ===== WEB DATA GENERATION =====
+jinja2>=3.1.2                    # Template generation
+flask>=2.3.2                     # Web application data generation
+django>=4.2.1                    # Web framework data generation
+tornado>=6.3.2                   # Async web data generation
+
+# ===== SPECIALIZED FORMAT LIBRARIES =====
+# Time & Date
+arrow>=1.2.3                     # Date/time generation
+python-dateutil>=2.8.2          # Date parsing and generation
+pytz>=2023.3                     # Timezone data
+
+# Scientific Formats
+h5py>=3.8.0                      # HDF5 file generation
+netcdf4>=1.6.3                   # NetCDF file generation
+
+# Geographic Data
+shapely>=2.0.1                   # Geometric data generation
+
+# Blockchain/Crypto
+web3>=6.5.1                      # Ethereum data generation
+bitcoin>=1.1.42                  # Bitcoin transaction generation
+base58>=2.1.1                    # Base58 encoding
+
+# ===== COMPRESSION & ENCODING =====
+zstandard>=0.21.0                # Zstandard compression
+lz4>=4.3.2                       # LZ4 compression
+snappy>=1.1.10                   # Snappy compression
+
+# ===== TEMPLATE & CODE GENERATION =====
+# For generating source code to fuzz compilers/parsers
+astroid>=2.15.4                  # Python AST manipulation
+
+# ===== COMMUNICATION PROTOCOLS =====
+paramiko>=3.1.0                  # SSH protocol data generation
+pysnmp>=4.4.12                   # SNMP data generation
+
+# ===== HTTP SERVICE (for simple_service.py) =====
+fastapi>=0.109.0                 # Modern async web framework
+uvicorn[standard]>=0.27.0        # ASGI server for FastAPI
+pydantic>=2.5.0                  # Data validation

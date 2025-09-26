@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package DirectedFuzzer;
+
+enum Status {
+    DF_SUCCESS = 0;
+    DF_FAILURE = 1;
+}
+
+enum Command {
+    DF_RUN   = 0;
+    DF_STOP  = 1;
+}
+
+message DirectedFuzzerRequest {
+    Command cmd                      = 1;
+    string nonce                     = 2;
+    string artifacts_path            = 3;
+    string harness_id                = 4;
+    string location                  = 5;
+    int32 node_idx                   = 6;
+    repeated int32 cores             = 7;
+    string cp_name                   = 8;
+    string cp_src_path               = 9;
+    string cp_mount_path             = 10;
+    string output_path               = 11;
+    string task_id                   = 12;
+    string fuzzer_session_id         = 13;
+    repeated string corpus_files     = 14;
+    repeated string dictionary_files = 15;
+    optional string sarif_id         = 16;
+}
+
+message DirectedFuzzerResponse {
+    Command cmd              = 1;
+    string harness_id        = 2;
+    string fuzzer_session_id = 3;
+    Status status            = 4;
+    string aux               = 5;
+    int32 node_idx           = 6;
+    string corpus_path       = 7;
+    string crashes_path      = 8;
+}

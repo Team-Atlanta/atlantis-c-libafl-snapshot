@@ -1,0 +1,21 @@
+syntax = "proto3";
+ 
+package c_llm;
+  
+message CorpusPathResult {
+    string fuzzer_session_id = 1;
+    string corpus_path = 2;
+    string harness_id = 3;
+    string fuzzer_binary_path = 4;
+}
+
+message CLLMStartRequest {
+    string corpus_dir = 1;
+    string harness_source_file = 2;
+    string cp_source_dir = 3;
+    string fuzzing_target = 4;
+}
+
+message CLLMResult {
+    bytes mutated_input = 1;
+}
