@@ -25,7 +25,7 @@ COPY deepgen_service/patch.py /app/patch.py
 RUN chmod +x /app/patch.py
 
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN nix develop --extra-experimental-features 'flakes nix-command' -c cargo install --path .
+RUN nix develop --extra-experimental-features 'flakes nix-command' -c cargo install --path . --locked
 RUN /app/patch.py /root/.cargo/bin/code-browser-server
 
 FROM ubuntu:20.04 as builder

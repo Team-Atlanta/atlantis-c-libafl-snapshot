@@ -13,6 +13,7 @@ path = "src/cxx_wrapper.rs"
 
 [dependencies]
 file-lock = "2.1.11"
+home = "=0.5.11"
 libafl_cc = { path = "../LibAFL/libafl_cc/" }
 pathsearch = "0.2.0"
 tempfile = "3.13.0"
