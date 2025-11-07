@@ -1,7 +1,7 @@
 # ARG parent_image
 
 # DeepGen
-FROM openjdk:17-jdk AS java17
+FROM eclipse-temurin:17-jdk-slim AS java17
 
 FROM nixos/nix:2.28.3 AS nix-builder
 
