@@ -1,8 +1,3 @@
-# ARG parent_image
-
-# DeepGen
-FROM eclipse-temurin:17-jdk AS java17
-
 FROM nixos/nix:2.28.3 AS nix-builder
 
 WORKDIR /app
@@ -48,16 +43,6 @@ RUN wget https://www.python.org/ftp/python/3.12.0/Python-3.12.0.tgz \
 # Base runner
 FROM gcr.io/oss-fuzz-base/base-runner
 
-# COPY --from=$parent_image /src /src
-
-ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=US \
-    JAVA_HOME=/usr/local/openjdk-17 \
-    JAVA_15_HOME=/usr/local/openjdk-15 \
-    PATH="/usr/local/openjdk-17/bin:/usr/local/openjdk-15/bin:/root/.local/bin:/usr/local/bin:/venv-deepgen/bin:/deepgen_service:$PATH" \
-    PYTHONUNBUFFERED=1
-
-COPY --from=java17 /usr/local/openjdk-17 /usr/local/openjdk-17
 COPY --from=nix-builder /app/out /deepgen_service/
 COPY --from=builder /usr/local /usr/local
 COPY ./libs/userspace-code-browser/ /libs/userspace-code-browser/
