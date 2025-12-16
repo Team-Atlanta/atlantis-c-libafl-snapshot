@@ -342,6 +342,7 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
         super().__init__(*args, **kwargs)
         self.error_threshold = 100
         self.corpus_dir: Path = self.work_dir_path / "corpus"
+        self.output_dir: Path = self.work_dir_path / "povs"
         self.fuzzer_config_path: Path = self.work_dir_path / f"fuzzer_config_{self.harness_id}.json"
         self.fuzzer_config = None
         self.fuzzer_log_path: Path = self.work_dir_path / "fuzzer.log"
