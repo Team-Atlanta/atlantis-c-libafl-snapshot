@@ -337,11 +337,14 @@ class BaseFuzzerSession(ABC):
         self.error(error_msg)
 
 
+ARTIFACTS_DIR = Path("/artifacts")
+
 class LibAFLFuzzerSession(BaseFuzzerSession):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.error_threshold = 100
-        self.corpus_dir: Path = self.work_dir_path / "corpus"
+        self.corpus_dir: Path = ARTIFACTS_DIR / "corpus"
+        self.output_dir: Path = ARTIFACTS_DIR / "povs"
         self.fuzzer_config_path: Path = self.work_dir_path / f"fuzzer_config_{self.harness_id}.json"
         self.fuzzer_config = None
         self.fuzzer_log_path: Path = self.work_dir_path / "fuzzer.log"
@@ -365,6 +368,10 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
     @property
     def corpus_paths(self) -> list[str]:
         return [str(self.corpus_dir)]
+
+    def prepare_command(self) -> str:
+        """Run the binary directly - it's linked with libfuzzer.so"""
+        return str(self.binary)
 
     def check_setup(self):
         if not self.fuzzer_config_path.exists():
@@ -411,6 +418,7 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
             "log_file": str(self.fuzzer_log_path),
             "cores": self.cores,
             "dictionary_files": [str(p) for p in self.dictionary_files],
+            "seed_share_dir": "/seed_share_dir",
         }
 
         # dot-options parsing
@@ -438,6 +446,7 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
 
     def setup(self):
         super().setup()
+        self.corpus_dir.mkdir(parents=True, exist_ok=True)
 
         fuzzer_env = {
             "LD_LIBRARY_PATH": str(self.artifacts_dir) if self.artifacts_dir else "",

@@ -49,6 +49,7 @@ use rdkafka::ClientConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    file_poller_mutator::FilePollerMutator,
     kafka_consumer_mutator::KafkaConsumerMutator, kafka_producer_feedback::KafkaProducerFeedback,
     truncate_mutator::TruncateMutator,
     zmq_consumer_mutator::ZmqConsumerMutator,
@@ -66,6 +67,8 @@ mod util;
 // for ZeroMQ
 mod zmq_consumer_mutator;
 mod zmq_dealer;
+// for file polling
+mod file_poller_mutator;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -115,6 +118,9 @@ struct Config {
 
     /// List of dictionary files, also known as tokens
     dictionary_files: Vec<String>,
+
+    /// Directory to poll for shared seeds from other fuzzers
+    seed_share_dir: Option<String>,
 
     /// Number of cores to use
     cores: Vec<usize>,
@@ -316,9 +322,15 @@ fn run_client_inprocess(
     let truncate_mutator = TruncateMutator::new(config.max_len);
     let truncate_mutational_stage = StdMutationalStage::new(truncate_mutator);
 
+    let file_poller_mutator = FilePollerMutator::new(
+        PathBuf::from(config.seed_share_dir.as_deref().unwrap_or("/seed_share_dir")),
+        None,
+    );
+    let file_poller_stage = MultiMutationalStage::new(file_poller_mutator);
+
     // this is a bit gross without if-let chains
     if config.kafka_broker_addr.is_none() || config.kafka_seed_additions_topic.is_none() {
-        let mut stages = tuple_list!(zmq_mutational_stage, truncate_mutational_stage, calibration, tracing, i2s, power);
+        let mut stages = tuple_list!(zmq_mutational_stage, truncate_mutational_stage, calibration, tracing, i2s, power, file_poller_stage);
         fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)?;
     } else {
         let broker_addr = config.kafka_broker_addr.as_ref().unwrap().clone();
@@ -347,7 +359,8 @@ fn run_client_inprocess(
             calibration,
             tracing,
             i2s,
-            power
+            power,
+            file_poller_stage
         );
         fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)?;
     }
