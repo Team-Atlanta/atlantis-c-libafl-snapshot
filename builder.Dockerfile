@@ -100,5 +100,4 @@ RUN python3.12 -m venv /crs/venv && \
 
 COPY ./config_gen /crs/config_gen
 COPY ./build.py /crs/build.py
-COPY ./haiku.py /crs/haiku.py
 CMD ["python3.12", "/crs/build.py"]

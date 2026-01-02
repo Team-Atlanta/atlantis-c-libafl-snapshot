@@ -574,22 +574,6 @@ def run(harness):
 
 
 if __name__ == "__main__":
-    # Request a haiku in the background to demonstrate LLM integration
-    print("\n" + "="*60)
-    print("Starting haiku request in background...")
-    print("="*60)
-    try:
-        haiku_process = subprocess.Popen(
-            ["/venv-deepgen/bin/python3", "/crs/haiku.py"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
-        )
-        logging.info(f"Haiku request started in background (PID: {haiku_process.pid})")
-    except Exception as e:
-        logging.warning(f"Failed to start haiku request: {e}")
-        # Don't fail the runner if haiku request fails to start
-
     parser = ArgumentParser()
     parser.add_argument("harness")
     parser.add_argument("fuzzer_args", nargs="*")

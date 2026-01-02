@@ -105,15 +105,3 @@ if __name__ == "__main__":
     build_config_gen()
     build_libafl()
     restore_src_backup()
-
-    # Request a haiku after build completes to demonstrate LLM
-    print("\n" + "="*60)
-    print("Build complete! Requesting haiku...")
-    print("="*60)
-    try:
-        subprocess.run(["/crs/venv/bin/python3", "/crs/haiku.py"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Warning: Failed to get haiku: {e}")
-        # Don't fail the build if haiku request fails
-    except Exception as e:
-        print(f"Warning: Unexpected error getting haiku: {e}")
