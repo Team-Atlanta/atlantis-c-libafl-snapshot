@@ -316,9 +316,6 @@ fn run_client_inprocess(
     )?;
     let power = StdPowerMutationalStage::new(mutator);
 
-    let zmq_mutator = ZmqConsumerMutator::new(&config.harness_id)?;
-    let zmq_mutational_stage = MultiMutationalStage::new(zmq_mutator);
-
     let truncate_mutator = TruncateMutator::new(config.max_len);
     let truncate_mutational_stage = StdMutationalStage::new(truncate_mutator);
 
@@ -330,7 +327,7 @@ fn run_client_inprocess(
 
     // this is a bit gross without if-let chains
     if config.kafka_broker_addr.is_none() || config.kafka_seed_additions_topic.is_none() {
-        let mut stages = tuple_list!(zmq_mutational_stage, truncate_mutational_stage, calibration, tracing, i2s, power, file_poller_stage);
+        let mut stages = tuple_list!(truncate_mutational_stage, file_poller_stage, calibration, tracing, i2s, power);
         fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)?;
     } else {
         let broker_addr = config.kafka_broker_addr.as_ref().unwrap().clone();
@@ -354,13 +351,12 @@ fn run_client_inprocess(
 
         let mut stages = tuple_list!(
             kafka_mutational_stage,
-            zmq_mutational_stage,
             truncate_mutational_stage,
+            file_poller_stage,
             calibration,
             tracing,
             i2s,
-            power,
-            file_poller_stage
+            power
         );
         fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)?;
     }

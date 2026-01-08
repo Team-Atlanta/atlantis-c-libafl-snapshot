@@ -4,18 +4,17 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 
-use log::{debug, info, warn};
+use log::{debug, error, warn};
 
 use libafl::{
-    inputs::{Input, UsesInput},
+    inputs::{HasMutatorBytes, Input, UsesInput},
     mutators::MultiMutator,
     state::{HasMaxSize, HasRand},
     HasMetadata,
 };
 use libafl_bolts::Named;
 
-// Poll every 1000 cycles by default
-const DEFAULT_POLL_INTERVAL: usize = 1000;
+const DEFAULT_POLL_INTERVAL: usize = 20;
 
 /// A mutator that polls a directory for new seed files and adds them to the corpus.
 /// State is maintained in the struct between cycles.
@@ -29,7 +28,7 @@ pub struct FilePollerMutator {
 impl FilePollerMutator {
     pub fn new(seed_share_dir: PathBuf, poll_interval: Option<usize>) -> Self {
         let poll_interval = poll_interval.unwrap_or(DEFAULT_POLL_INTERVAL);
-        info!(
+        error!(
             "FilePollerMutator: Watching {:?} every {} cycles",
             seed_share_dir, poll_interval
         );
@@ -56,18 +55,20 @@ impl FilePollerMutator {
             let file_name = entry.file_name();
 
             if self.seen_files.contains(&file_name) {
+                error!("Already seen {}", &file_name.to_string_lossy());
                 continue;
             }
 
             let path = entry.path();
             if !path.is_file() {
+                error!("Not file {}", &file_name.to_string_lossy());
                 continue;
             }
 
             match fs::read(&path) {
                 Ok(contents) => {
                     if !contents.is_empty() {
-                        info!(
+                        error!(
                             "FilePollerMutator: New seed {:?} ({} bytes)",
                             file_name,
                             contents.len()
@@ -83,11 +84,14 @@ impl FilePollerMutator {
         }
 
         if !new_seeds.is_empty() {
-            info!(
+            error!(
                 "FilePollerMutator: Loaded {} new seeds (total seen: {})",
                 new_seeds.len(),
                 self.seen_files.len()
             );
+        }
+        else {
+            error!("Empty seeds");
         }
 
         new_seeds
@@ -103,24 +107,33 @@ impl Named for FilePollerMutator {
 impl<I, S> MultiMutator<I, S> for FilePollerMutator
 where
     S: UsesInput + HasMetadata + HasRand + HasMaxSize,
-    I: From<Vec<u8>> + Input,
+    I: HasMutatorBytes + Input,
 {
     fn multi_mutate(
         &mut self,
         _state: &mut S,
-        _input: &I,
+        input: &I,
         _max_count: Option<usize>,
     ) -> Result<Vec<I>, libafl::Error> {
         self.cycles_since_poll += 1;
 
         if self.cycles_since_poll < self.poll_interval {
+            error!("Cycles since poll {}", self.cycles_since_poll);
             return Ok(Vec::new());
         }
 
         self.cycles_since_poll = 0;
 
+        error!("Polling directory!");
         let new_seeds = self.poll_directory();
-        let new_inputs: Vec<I> = new_seeds.into_iter().map(I::from).collect();
+        let mut new_inputs = Vec::new();
+
+        for data in new_seeds {
+            let mut input_clone = input.clone();
+            input_clone.resize(0, 0);
+            input_clone.extend(&data);
+            new_inputs.push(input_clone);
+        }
 
         Ok(new_inputs)
     }

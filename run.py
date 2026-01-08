@@ -15,6 +15,10 @@ import configparser
 import logging
 import threading
 import time
+import hashlib
+import ctypes
+import ctypes.util
+import struct
 
 SRC_DIR = Path(os.getenv("SRC", "/src"))
 OUT_DIR = Path("/out")
@@ -24,6 +28,146 @@ BROKER_PORT = 13337
 CENTRALIZED_BROKER_PORT = 13338
 
 logging.basicConfig(level=logging.INFO)
+
+# inotify constants
+IN_CREATE = 0x00000100
+IN_CLOSE_WRITE = 0x00000008
+IN_MOVED_TO = 0x00000080
+INOTIFY_EVENT_SIZE = struct.calcsize('iIII')
+
+IGNORED_SUFFIXES = {'.tmp', '.metadata', '.lafl_lock'}
+
+
+def watch_and_copy_directory(
+    source_dir: Path,
+    dest_dir: Path,
+    seen_checksums: set,
+    lock: threading.Lock,
+    stop_event: threading.Event,
+    logger: Callable[[str], None]
+):
+    """
+    Watch source_dir using inotify and copy new unique files to dest_dir.
+
+    Files are skipped if:
+    - They start with '.' (hidden files)
+    - They end with .tmp, .metadata, or .lafl_lock
+    - Their SHA256 checksum has already been seen
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load libc for inotify syscalls
+    libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
+
+    # Wait for source directory to exist
+    while not stop_event.is_set() and not source_dir.exists():
+        stop_event.wait(0.5)
+
+    if stop_event.is_set():
+        return
+
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    # Initialize inotify
+    fd = libc.inotify_init1(os.O_NONBLOCK)
+    if fd < 0:
+        logger(f"Failed to initialize inotify: {ctypes.get_errno()}")
+        return
+
+    try:
+        # Add watch for file creation and close-write events
+        wd = libc.inotify_add_watch(
+            fd,
+            str(source_dir).encode(),
+            IN_CREATE | IN_CLOSE_WRITE | IN_MOVED_TO
+        )
+        if wd < 0:
+            logger(f"Failed to add inotify watch: {ctypes.get_errno()}")
+            return
+
+        # Process any existing files first
+        _process_existing_files(source_dir, dest_dir, seen_checksums, lock, logger)
+
+        # Main event loop
+        while not stop_event.is_set():
+            # Use select to wait for events with timeout
+            readable, _, _ = select.select([fd], [], [], 0.5)
+
+            if not readable:
+                continue
+
+            # Read events
+            buf = os.read(fd, 4096)
+            offset = 0
+
+            while offset < len(buf):
+                wd, mask, cookie, name_len = struct.unpack_from('iIII', buf, offset)
+                offset += INOTIFY_EVENT_SIZE
+
+                if name_len > 0:
+                    name = buf[offset:offset + name_len].rstrip(b'\x00').decode()
+                    offset += name_len
+
+                    # Only process on CLOSE_WRITE or MOVED_TO (file is complete)
+                    if mask & (IN_CLOSE_WRITE | IN_MOVED_TO):
+                        _process_file(source_dir / name, dest_dir, seen_checksums, lock, logger)
+
+    finally:
+        os.close(fd)
+
+
+def _process_existing_files(
+    source_dir: Path,
+    dest_dir: Path,
+    seen_checksums: set,
+    lock: threading.Lock,
+    logger: Callable[[str], None]
+):
+    """Process any files that already exist in the source directory."""
+    try:
+        for entry in source_dir.iterdir():
+            if entry.is_file():
+                _process_file(entry, dest_dir, seen_checksums, lock, logger)
+    except Exception as e:
+        logger(f"Error processing existing files: {e}")
+
+
+def _process_file(
+    path: Path,
+    dest_dir: Path,
+    seen_checksums: set,
+    lock: threading.Lock,
+    logger: Callable[[str], None]
+):
+    """Process a single file: check conditions and copy if unique."""
+    try:
+        if not path.exists() or not path.is_file():
+            return
+
+        # Skip hidden files
+        if path.name.startswith('.'):
+            return
+
+        # Skip unwanted extensions
+        if path.suffix in IGNORED_SUFFIXES:
+            return
+
+        # Read and checksum
+        contents = path.read_bytes()
+        checksum = hashlib.sha256(contents).hexdigest()
+
+        with lock:
+            if checksum in seen_checksums:
+                return
+            seen_checksums.add(checksum)
+
+        # Copy to destination
+        dest_path = dest_dir / path.name
+        dest_path.write_bytes(contents)
+        # logger(f"Copied {path.name} ({len(contents)} bytes) to {dest_dir.name}/")
+
+    except Exception as e:
+        logger(f"Error processing {path.name}: {e}")
 
 @dataclass
 class FdHandler:
@@ -173,7 +317,7 @@ class BaseFuzzerSession(ABC):
             "RUN_FUZZER_MODE": "noninteractive",
             "FUZZER_OUT": str(self.output_dir),
             "CORPUS_DIR": str(self.initial_corpus_dir), # for libfuzzer
-            "ASAN_OPTIONS": "abort_on_error=1:detect_leaks=0",
+            "ASAN_OPTIONS": "verbosity=0:abort_on_error=1:detect_leaks=0:print_stacktrace=0:print_legend=0",
             "TSAN_OPTIONS": "abort_on_error=1",
             "UBSAN_OPTIONS": "abort_on_error=1",
             "MSAN_OPTIONS": "abort_on_error=1",
@@ -343,14 +487,27 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.error_threshold = 100
+
+        # Staging directories (where libafl writes to)
+        self.staging_corpus_dir: Path = WORK_DIR / "staging_corpus"
+        self.staging_povs_dir: Path = WORK_DIR / "staging_povs"
+
+        # Artifact directories (where watcher copies unique files to)
         self.corpus_dir: Path = ARTIFACTS_DIR / "corpus"
         self.output_dir: Path = ARTIFACTS_DIR / "povs"
+
         self.fuzzer_config_path: Path = self.work_dir_path / f"fuzzer_config_{self.harness_id}.json"
         self.fuzzer_config = None
         self.fuzzer_log_path: Path = self.work_dir_path / "fuzzer.log"
         self.traceback_collection = False
         self.traceback_lines = 0
         self.traceback_limit = 100
+
+        # Watcher state (shared between corpus and pov watchers)
+        self.seen_checksums: set[str] = set()
+        self.checksum_lock = threading.Lock()
+        self.corpus_watcher_thread = None
+        self.povs_watcher_thread = None
 
     @property
     def mode(self) -> str:
@@ -413,8 +570,8 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
             "campaign_id": self.harness_id,
             "harness_id": self.harness_id,
             "initial_corpus_dir": str(self.initial_corpus_dir),
-            "output_dir": str(self.output_dir),
-            "corpus_dir": str(self.corpus_dir),
+            "output_dir": str(self.staging_povs_dir),
+            "corpus_dir": str(self.staging_corpus_dir),
             "log_file": str(self.fuzzer_log_path),
             "cores": self.cores,
             "dictionary_files": [str(p) for p in self.dictionary_files],
@@ -446,7 +603,14 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
 
     def setup(self):
         super().setup()
+
+        # Create staging directories (where libafl writes)
+        self.staging_corpus_dir.mkdir(parents=True, exist_ok=True)
+        self.staging_povs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create artifact directories (where watcher copies to)
         self.corpus_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         fuzzer_env = {
             "LD_LIBRARY_PATH": str(self.artifacts_dir) if self.artifacts_dir else "",
@@ -455,11 +619,47 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
             "RUST_BACKTRACE": "full",
         }
         if self.verbose:
-            fuzzer_env["RUST_LOG"] = "info"
-        
+            fuzzer_env["RUST_LOG"] = "error,libafl::executors::hooks::unix::unix_signal_handler=off"
+
         self.fuzzer_env.update(fuzzer_env)
-        
+
         self.setup_fuzzer_config()
+
+    def setup_monitoring(self):
+        """Set up monitoring threads including inotify watchers for corpus and povs."""
+        super().setup_monitoring()
+
+        # Start corpus watcher thread
+        self.corpus_watcher_thread = threading.Thread(
+            target=watch_and_copy_directory,
+            args=(
+                self.staging_corpus_dir,
+                self.corpus_dir,
+                self.seen_checksums,
+                self.checksum_lock,
+                self.stop_event,
+                self.info
+            ),
+            daemon=True
+        )
+        self.corpus_watcher_thread.start()
+
+        # Start povs watcher thread
+        self.povs_watcher_thread = threading.Thread(
+            target=watch_and_copy_directory,
+            args=(
+                self.staging_povs_dir,
+                self.output_dir,
+                self.seen_checksums,
+                self.checksum_lock,
+                self.stop_event,
+                self.info
+            ),
+            daemon=True
+        )
+        self.povs_watcher_thread.start()
+
+        self.info(f"Started inotify watchers: {self.staging_corpus_dir} -> {self.corpus_dir}, {self.staging_povs_dir} -> {self.output_dir}")
 
     def _handle_error_output(self, error_output: str):
         """Handle LibAFL-specific error output including panic traceback collection"""
