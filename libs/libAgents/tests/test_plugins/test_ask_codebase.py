@@ -47,7 +47,7 @@ def os_env_patch():
         "OPENAI_BASE_URL": "https://test-api.openai.com",
         "OPENAI_API_KEY": "test-api-key",
         "LITELLM_KEY": "test-litellm-key",
-        "AIXCC_LITELLM_HOSTNAME": "https://test-litellm.com",
+        "LITELLM_URL": "https://test-litellm.com",
     }
 
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Simplified DeepGen Service - HTTP API for script submission
+Simplified DeepGen Service - HTTP API for script submission and LLM-powered seed generation
 """
 
 import asyncio
 import logging
 import os
+import tarfile
 from pathlib import Path
 from typing import Optional
 import psutil
@@ -17,6 +18,9 @@ from contextlib import asynccontextmanager
 from libDeepGen.engine import DeepGenEngine
 from libDeepGen.submit import ZeroMQSubmit
 from libDeepGen.tasks.script_loader import ScriptLoaderTask
+from libDeepGen.tasks.harness_seedgen import AnyHarnessSeedGen
+from libDeepGen.tasks.diff import DiffAnalysisTask
+from libAgents.utils import Project
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +32,22 @@ TEMPFS_DIR = os.environ.get("ENSEMBLER_TMPFS", "/tmpfs")
 # Optional default harness name
 DEFAULT_HARNESS_NAME = os.environ.get("HARNESS_NAME")
 
+# Project configuration (for LLM-powered seed generation)
+ARTIFACTS_DIR = Path(os.environ.get("ARTIFACTS_DIR", "/artifacts"))
+PROJECT_NAME = os.environ.get("OSS_FUZZ_PROJECT_NAME", os.environ.get("PROJECT_NAME", "unknown"))
+CONFIG_JSON_PATH = ARTIFACTS_DIR / "config.json"
+PROJECT_TARBALL_PATH = ARTIFACTS_DIR / "project.tar.gz"
+REF_DIFF_PATH = Path(os.environ.get("REF_DIFF_PATH", "/ref.diff"))
+
+# LLM configuration
+DEFAULT_HARNESS_ENTRYPOINT = os.environ.get("HARNESS_ENTRYPOINT", "LLVMFuzzerTestOneInput")
+LLM_WEIGHTED_MODELS = os.environ.get("LLM_MODELS", "claude-sonnet-4-20250514:1").split(",")
+IS_JVM_PROJECT = os.environ.get("IS_JVM", "false").lower() == "true"
+
 # Engine configuration - with defaults
-CORES = list(map(int, os.environ.get("CORES", "1,2,3,4").split(",")))
+# Use DEEPGEN_CPUS (set by start.sh) or fall back to CPUSET_CPUS/CORES
+_cpuset_str = os.environ.get("DEEPGEN_CPUS") or os.environ.get("CPUSET_CPUS") or os.environ.get("CORES", "1,2,3,4")
+CORES = list(map(int, _cpuset_str.split(","))) if _cpuset_str else []
 SHM_LABEL = os.environ.get("SHM_LABEL", "dg_simple")
 SEED_MAX_SIZE = int(os.environ.get("SEED_MAX_SIZE", 262144))
 SEED_POOL_SIZE = int(os.environ.get("SEED_POOL_SIZE", 10000))
@@ -49,7 +67,9 @@ SERVICE_PORT = int(os.environ.get("SERVICE_PORT", 8000))
 # Global state
 # ============================================================================
 engine: Optional[DeepGenEngine] = None
+project: Optional[Project] = None
 script_submission_count = 0
+llm_generation_count = 0
 
 
 # ============================================================================
@@ -96,10 +116,47 @@ class ServiceStatus(BaseModel):
     """Response model for service status"""
     running: bool
     default_harness_name: Optional[str]
+    project_name: Optional[str]
+    available_harnesses: list[str]
+    llm_enabled: bool
+    diff_mode: bool
+    diff_lines: Optional[int]
     cores: list[int]
     shm_label: str
     scripts_submitted: int
+    llm_generations: int
     workdir: str
+
+
+class ScriptInfo(BaseModel):
+    """Info about a generated script"""
+    file_path: str
+    task_label: str
+    harness_name: str
+    sha256: str
+    size_bytes: int
+    content_preview: str  # First 500 chars
+
+
+class LLMGenerationRequest(BaseModel):
+    """Request model for LLM-powered seed generation"""
+    harness_name: str = Field(..., description="Target harness name (must exist in project)")
+    harness_entrypoint: str = Field(
+        default="LLVMFuzzerTestOneInput",
+        description="Entrypoint function name"
+    )
+    priority: int = Field(1, ge=1, le=100, description="Priority (1-100)")
+    num_repeat: int = Field(1, ge=1, description="Number of times to repeat")
+    max_exec: Optional[int] = Field(None, description="Max executions (unlimited if not set)")
+
+
+class LLMGenerationResponse(BaseModel):
+    """Response model for LLM generation"""
+    status: str
+    message: str
+    task_id: Optional[str] = None
+    harness_name: str
+    harness_path: Optional[str] = None
 
 
 # ============================================================================
@@ -117,24 +174,80 @@ class SeedCountingZeroMQSubmit(ZeroMQSubmit):
 # ============================================================================
 # Lifespan management
 # ============================================================================
+def bootstrap_project(workdir: Path) -> Optional[Project]:
+    """Bootstrap Project from runner config if available."""
+    if not CONFIG_JSON_PATH.exists():
+        logger.warning(f"Config JSON not found at {CONFIG_JSON_PATH}, LLM generation disabled")
+        return None
+
+    # Extract source tarball if exists
+    src_path = workdir / "src"
+    if PROJECT_TARBALL_PATH.exists() and not src_path.exists():
+        logger.info(f"Extracting {PROJECT_TARBALL_PATH} to {workdir}")
+        try:
+            with tarfile.open(PROJECT_TARBALL_PATH, "r:gz") as tar:
+                tar.extractall(workdir)
+            logger.info(f"Extracted source to {src_path}")
+        except Exception as e:
+            logger.error(f"Failed to extract tarball: {e}")
+            return None
+    elif not src_path.exists():
+        logger.warning(f"Source path {src_path} does not exist and no tarball to extract")
+        return None
+
+    # Check for ref.diff (delta mode)
+    ref_diff_path = REF_DIFF_PATH if REF_DIFF_PATH.exists() else None
+    if ref_diff_path:
+        logger.info(f"Found ref.diff at {ref_diff_path} - delta mode enabled")
+
+    # Create Project from runner config
+    try:
+        proj = Project.from_runner_config(
+            config_json_path=CONFIG_JSON_PATH,
+            src_path=src_path,
+            project_name=PROJECT_NAME,
+            ref_diff_path=ref_diff_path,
+        )
+        logger.info(f"Project bootstrapped: {proj.name} with {len(proj.harnesses)} harnesses")
+        logger.info(f"Available harnesses: {list(proj.harnesses.keys())}")
+        if proj.ref_diff:
+            logger.info(f"Delta mode: ref.diff loaded ({len(proj.ref_diff)} bytes)")
+        return proj
+    except Exception as e:
+        logger.error(f"Failed to bootstrap Project: {e}", exc_info=True)
+        return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic"""
-    global engine
+    global engine, project
 
     logger.info("=" * 80)
-    logger.info("Starting Simplified DeepGen Service")
+    logger.info("Starting DeepGen Service with LLM Support")
     logger.info("=" * 80)
+    logger.info(f"Project Name: {PROJECT_NAME}")
     logger.info(f"Default Harness: {DEFAULT_HARNESS_NAME or 'None (must specify in request)'}")
-    logger.info(f"Cores: {CORES}")
+    logger.info(f"DeepGen CPUs: {CORES} ({len(CORES)} cores)")
     logger.info(f"SHM Label: {SHM_LABEL}")
     logger.info(f"Router Address: {ROUTER_ADDR}")
     logger.info("=" * 80)
+
+    if not CORES:
+        logger.error("No CPUs allocated for DeepGen. Check DEEPGEN_CPUS environment variable.")
+        raise RuntimeError("No CPUs allocated for DeepGen executor")
 
     # Prepare working directory
     workdir = Path(TEMPFS_DIR) / "deepgen_workdir"
     workdir.mkdir(exist_ok=True, parents=True)
     logger.info(f"Working directory: {workdir}")
+
+    # Bootstrap Project for LLM-powered generation
+    project = bootstrap_project(workdir)
+    if project:
+        logger.info("LLM-powered seed generation enabled")
+    else:
+        logger.info("LLM-powered seed generation disabled (no project config)")
 
     # Set CPU affinity for main process
     try:
@@ -147,6 +260,10 @@ async def lifespan(app: FastAPI):
     # Initialize DeepGenEngine
     try:
         logger.info("Initializing DeepGenEngine...")
+        # Ensure IPC directory exists for ZMQ
+        ipc_dir = Path("/tmp/ipc")
+        ipc_dir.mkdir(parents=True, exist_ok=True)
+
         engine = DeepGenEngine(
             core_ids=CORES[1:] if len(CORES) > 1 else CORES,
             submit_class=SeedCountingZeroMQSubmit,
@@ -173,6 +290,53 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize DeepGenEngine: {e}", exc_info=True)
         raise
+
+    # Auto-trigger LLM generation on startup
+    if project and engine and DEFAULT_HARNESS_NAME:
+        target_harness = DEFAULT_HARNESS_NAME
+        if target_harness in project.harnesses:
+            logger.info("=" * 40)
+
+            # Always submit AnyHarnessSeedGen task (works for both modes)
+            logger.info("AUTO-TRIGGER: Submitting LLM harness analysis task")
+            try:
+                weighted_models = parse_weighted_models(os.environ.get("LLM_MODELS", "claude-sonnet-4-20250514:1"))
+                task = AnyHarnessSeedGen(
+                    project_bundle=project,
+                    harness_name=target_harness,
+                    harness_entrypoint_func=DEFAULT_HARNESS_ENTRYPOINT,
+                    is_jvm=IS_JVM_PROJECT,
+                    weighted_models=weighted_models,
+                    priority=5,  # Lower priority than diff task
+                    num_repeat=1,
+                )
+                task_id = await engine.add_task(task)
+                logger.info(f"AUTO-TRIGGER: Submitted LLM task for harness '{target_harness}' (task_id={task_id})")
+            except Exception as e:
+                logger.error(f"AUTO-TRIGGER: Failed to submit LLM task for '{target_harness}': {e}")
+
+            # Additionally submit DiffAnalysisTask if in delta mode
+            if project.ref_diff:
+                logger.info("AUTO-TRIGGER: ref.diff detected, also submitting diff analysis task")
+                model = os.environ.get("LLM_MODELS", "claude-sonnet-4-20250514").split(":")[0]
+                try:
+                    task = DiffAnalysisTask(
+                        project_bundle=project,
+                        harness_id=target_harness,
+                        model=model,
+                        priority=10,  # Higher priority for diff tasks
+                        num_repeat=1,
+                    )
+                    task_id = await engine.add_task(task)
+                    logger.info(f"AUTO-TRIGGER: Submitted diff task for harness '{target_harness}' (task_id={task_id})")
+                except Exception as e:
+                    logger.error(f"AUTO-TRIGGER: Failed to submit diff task for '{target_harness}': {e}")
+
+            logger.info("=" * 40)
+        else:
+            logger.warning(f"AUTO-TRIGGER: HARNESS_NAME '{target_harness}' not found in project harnesses: {list(project.harnesses.keys())}")
+    elif project and engine:
+        logger.info("AUTO-TRIGGER: No HARNESS_NAME set, skipping auto-trigger (use /generate_llm or /generate_diff_seeds manually)")
 
     logger.info("Service startup complete - ready to accept scripts!")
 
@@ -208,11 +372,16 @@ app = FastAPI(
 async def root():
     """Root endpoint"""
     return {
-        "service": "DeepGen Script Submission Service",
-        "version": "1.0.0",
+        "service": "DeepGen Service with LLM Support",
+        "version": "2.0.0",
         "status": "running" if engine else "initializing",
+        "llm_enabled": project is not None,
         "endpoints": {
             "submit": "POST /submit_script",
+            "generate_llm": "POST /generate_llm",
+            "generate_diff_seeds": "POST /generate_diff_seeds",
+            "scripts": "GET /scripts",
+            "engine_stats": "GET /engine_stats",
             "status": "GET /status",
             "health": "GET /health",
         }
@@ -225,6 +394,7 @@ async def health_check():
     return {
         "status": "healthy" if engine else "unhealthy",
         "engine_running": engine is not None,
+        "llm_enabled": project is not None,
     }
 
 
@@ -234,12 +404,19 @@ async def get_status():
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
+    ref_diff = project.ref_diff if project else None
     return ServiceStatus(
         running=True,
         default_harness_name=DEFAULT_HARNESS_NAME,
+        project_name=project.name if project else None,
+        available_harnesses=list(project.harnesses.keys()) if project else [],
+        llm_enabled=project is not None,
+        diff_mode=ref_diff is not None,
+        diff_lines=len(ref_diff.splitlines()) if ref_diff else None,
         cores=CORES,
         shm_label=SHM_LABEL,
         scripts_submitted=script_submission_count,
+        llm_generations=llm_generation_count,
         workdir=str(engine.workdir) if engine and hasattr(engine, 'workdir') else str(Path(TEMPFS_DIR) / "deepgen_workdir"),
     )
 
@@ -320,6 +497,301 @@ async def submit_script(submission: ScriptSubmission):
     except Exception as e:
         logger.error(f"Error submitting script: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to submit script: {str(e)}")
+
+
+def parse_weighted_models(models_str: str) -> dict[str, int]:
+    """Parse weighted models string like 'model1:weight1,model2:weight2'"""
+    result = {}
+    for item in models_str.split(","):
+        item = item.strip()
+        if ":" in item:
+            model, weight = item.rsplit(":", 1)
+            result[model.strip()] = int(weight)
+        else:
+            result[item] = 1
+    return result
+
+
+@app.get("/scripts", response_model=list[ScriptInfo])
+async def list_scripts():
+    """
+    List all generated scripts in the workdir.
+
+    Returns script metadata and a preview of the content.
+    Useful for debugging LLM-generated seed generators.
+    """
+    import glob
+
+    if not engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    workdir = Path(TEMPFS_DIR) / "deepgen_workdir"
+    scripts = []
+
+    # Find all script files
+    for script_path in glob.glob(str(workdir / "processor-*" / "script-*.py")):
+        try:
+            path = Path(script_path)
+            content = path.read_text()
+
+            # Parse task label and hash from filename: script-{task_label}-{hash}.py
+            filename = path.stem  # script-Any-harness_name-abcd1234
+            parts = filename.split("-")
+            if len(parts) >= 3:
+                task_label = "-".join(parts[1:-1])  # Everything between script- and -hash
+                sha256_prefix = parts[-1]
+            else:
+                task_label = "unknown"
+                sha256_prefix = "unknown"
+
+            # Try to determine harness from task label (format: "Any:harness_name")
+            harness_name = task_label.split(":")[-1] if ":" in task_label else "unknown"
+
+            scripts.append(ScriptInfo(
+                file_path=script_path,
+                task_label=task_label,
+                harness_name=harness_name,
+                sha256=sha256_prefix,
+                size_bytes=len(content),
+                content_preview=content[:500] + ("..." if len(content) > 500 else "")
+            ))
+        except Exception as e:
+            logger.warning(f"Error reading script {script_path}: {e}")
+
+    return sorted(scripts, key=lambda s: s.file_path)
+
+
+@app.get("/scripts/{script_hash}")
+async def get_script_content(script_hash: str):
+    """
+    Get full content of a script by its hash prefix.
+
+    Use the hash from /scripts endpoint to retrieve full script content.
+    """
+    import glob
+
+    if not engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    workdir = Path(TEMPFS_DIR) / "deepgen_workdir"
+
+    # Find script with matching hash
+    for script_path in glob.glob(str(workdir / "processor-*" / f"script-*-{script_hash}*.py")):
+        try:
+            content = Path(script_path).read_text()
+            return {
+                "file_path": script_path,
+                "content": content,
+                "size_bytes": len(content)
+            }
+        except Exception as e:
+            logger.error(f"Error reading script {script_path}: {e}")
+            raise HTTPException(status_code=500, detail=f"Error reading script: {e}")
+
+    raise HTTPException(status_code=404, detail=f"Script with hash {script_hash} not found")
+
+
+@app.get("/engine_stats")
+async def get_engine_stats():
+    """
+    Get detailed engine statistics including per-script execution stats.
+
+    Shows executions, errors, seeds generated, and whether scripts are masked.
+    """
+    if not engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    try:
+        stats = await engine.dump_statistics()
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting engine stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting stats: {e}")
+
+
+@app.post("/generate_llm", response_model=LLMGenerationResponse)
+async def generate_llm(request: LLMGenerationRequest):
+    """
+    Generate seed script using LLM analysis of the harness code.
+
+    This uses libAgents to analyze the harness source code and generate
+    a high-quality seed generation script automatically.
+
+    Requires:
+    - Project to be bootstrapped (config.json + project.tar.gz in /artifacts)
+    - LITELLM_KEY and LITELLM_URL environment variables
+
+    Parameters:
+    - harness_name: Target harness (must exist in project config)
+    - harness_entrypoint: Function name to analyze (default: LLVMFuzzerTestOneInput)
+    - priority: Priority 1-100 (default: 1)
+    - num_repeat: Number of times to repeat (default: 1)
+    - max_exec: Max executions (default: unlimited)
+    """
+    global llm_generation_count
+
+    if not engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    if not project:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM generation not available - project not bootstrapped. "
+                   "Ensure config.json and project.tar.gz exist in /artifacts"
+        )
+
+    # Validate harness exists
+    if request.harness_name not in project.harnesses:
+        available = list(project.harnesses.keys())
+        raise HTTPException(
+            status_code=400,
+            detail=f"Harness '{request.harness_name}' not found. Available: {available}"
+        )
+
+    try:
+        # Parse weighted models
+        weighted_models = parse_weighted_models(os.environ.get("LLM_MODELS", "claude-sonnet-4-20250514:1"))
+
+        # Create AnyHarnessSeedGen task
+        task = AnyHarnessSeedGen(
+            project_bundle=project,
+            harness_name=request.harness_name,
+            harness_entrypoint_func=request.harness_entrypoint,
+            is_jvm=IS_JVM_PROJECT,
+            weighted_models=weighted_models,
+            priority=request.priority,
+            num_repeat=request.num_repeat,
+            max_exec=request.max_exec,
+        )
+
+        # Submit to engine
+        task_id = await engine.add_task(task)
+
+        if not task_id:
+            raise HTTPException(status_code=500, detail="Failed to add LLM task to engine")
+
+        llm_generation_count += 1
+        harness_path = str(project.harness_path_by_name(request.harness_name))
+
+        logger.info(
+            f"LLM generation submitted: harness={request.harness_name}, "
+            f"task_id={task_id}, entrypoint={request.harness_entrypoint}"
+        )
+
+        return LLMGenerationResponse(
+            status="success",
+            message="LLM seed generation task submitted",
+            task_id=task_id,
+            harness_name=request.harness_name,
+            harness_path=harness_path,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting LLM task: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to submit LLM task: {str(e)}")
+
+
+class DiffGenerationRequest(BaseModel):
+    """Request model for diff-based seed generation"""
+    harness_name: str = Field(..., description="Target harness name (must exist in project)")
+    priority: int = Field(1, ge=1, le=100, description="Priority (1-100)")
+    num_repeat: int = Field(1, ge=1, description="Number of times to repeat")
+
+
+class DiffGenerationResponse(BaseModel):
+    """Response model for diff generation"""
+    status: str
+    message: str
+    task_id: Optional[str] = None
+    harness_name: str
+    diff_lines: int
+
+
+@app.post("/generate_diff_seeds", response_model=DiffGenerationResponse)
+async def generate_diff_seeds(request: DiffGenerationRequest):
+    """
+    Generate seed script using diff analysis.
+
+    This analyzes the ref.diff to identify vulnerabilities and generates
+    targeted seeds to trigger bugs introduced by the patch.
+
+    Requires:
+    - Project to be bootstrapped with ref.diff available
+    - LITELLM_KEY and LITELLM_URL environment variables
+
+    Parameters:
+    - harness_name: Target harness (must exist in project config)
+    - priority: Priority 1-100 (default: 1)
+    - num_repeat: Number of times to repeat (default: 1)
+    """
+    global llm_generation_count
+
+    if not engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    if not project:
+        raise HTTPException(
+            status_code=503,
+            detail="Diff generation not available - project not bootstrapped"
+        )
+
+    if not project.ref_diff:
+        raise HTTPException(
+            status_code=503,
+            detail="Diff generation not available - no ref.diff found. "
+                   "Ensure /ref.diff is mounted or pass --diff to oss-crs"
+        )
+
+    # Validate harness exists
+    if request.harness_name not in project.harnesses:
+        available = list(project.harnesses.keys())
+        raise HTTPException(
+            status_code=400,
+            detail=f"Harness '{request.harness_name}' not found. Available: {available}"
+        )
+
+    try:
+        # Get model from env
+        model = os.environ.get("LLM_MODELS", "claude-sonnet-4-20250514").split(":")[0]
+
+        # Create DiffAnalysisTask
+        task = DiffAnalysisTask(
+            project_bundle=project,
+            harness_id=request.harness_name,
+            model=model,
+            priority=request.priority,
+            num_repeat=request.num_repeat,
+        )
+
+        # Submit to engine
+        task_id = await engine.add_task(task)
+
+        if not task_id:
+            raise HTTPException(status_code=500, detail="Failed to add diff task to engine")
+
+        llm_generation_count += 1
+        diff_lines = len(project.ref_diff.splitlines())
+
+        logger.info(
+            f"Diff-based generation submitted: harness={request.harness_name}, "
+            f"task_id={task_id}, diff_lines={diff_lines}"
+        )
+
+        return DiffGenerationResponse(
+            status="success",
+            message="Diff-based seed generation task submitted",
+            task_id=task_id,
+            harness_name=request.harness_name,
+            diff_lines=diff_lines,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting diff task: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to submit diff task: {str(e)}")
 
 
 # ============================================================================

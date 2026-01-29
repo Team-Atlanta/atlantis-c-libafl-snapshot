@@ -7,7 +7,7 @@
       "JINA_API_KEY": "",
       "BRAVE_API_KEY": "",
       "DEFAULT_MODEL_NAME": "",
-      "AIXCC_LITELLM_HOSTNAME": "",
+      "LITELLM_URL": "",
       "LITELLM_KEY": ""
     },
     "defaults": {

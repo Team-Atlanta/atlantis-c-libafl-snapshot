@@ -176,5 +176,8 @@ if __name__ == "__main__":
         final_result = await self.coder.run(prompt)
         # TODO: add cost calculation when supported
         token_cost = 0
+        if final_result is None:
+            logger.warning("Agent returned None (likely timeout)")
+            return None, token_cost
         processed_result = await self._post_process(final_result)
         return processed_result, token_cost

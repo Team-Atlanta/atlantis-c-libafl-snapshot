@@ -10,12 +10,22 @@ logger = logging.getLogger(__name__)
 def get_model_by_weights(weighted_models: Dict[str, int]) -> str:
     """
     Get a model from a weighted list of models.
+    Filters out unavailable models (e.g., gemini models without credentials).
     """
     if weighted_models is None:
         logger.warning("No weighted models provided. Using default model: gpt-4.1")
         return "gpt-4.1"
-    keys = list(weighted_models.keys())
-    weights = list(weighted_models.values())
+
+    # Filter out gemini models as they require separate Google credentials
+    # that may not be available in all environments
+    filtered_models = {k: v for k, v in weighted_models.items() if "gemini" not in k.lower()}
+
+    if not filtered_models:
+        logger.warning("No available models after filtering. Using default model: gpt-4.1")
+        return "gpt-4.1"
+
+    keys = list(filtered_models.keys())
+    weights = list(filtered_models.values())
     chosen = random.choices(keys, weights=weights, k=1)[0]
     logger.info(f"Chosen model: {chosen}")
     return chosen

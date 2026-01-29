@@ -44,7 +44,7 @@ if env.get("https_proxy"):
         logging.error("Failed to set proxy: %s", error)
 
 OPENAI_BASE_URL = env.get("OPENAI_BASE_URL")
-LITELLEM_BASE_URL = env.get("AIXCC_LITELLM_HOSTNAME")
+LITELLEM_BASE_URL = env.get("LITELLM_URL")
 LITELLEM_KEY = env.get("LITELLM_KEY")
 GEMINI_API_KEY = env.get("GEMINI_API_KEY")
 OPENAI_API_KEY = env.get("OPENAI_API_KEY")

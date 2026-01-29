@@ -134,11 +134,14 @@ class TaskBoard:
             while task.has_quota() and cur_attempts < task.dev_attempts and should_continue_fn():
                 try:
                     cur_attempts += 1
+                    logger.info(f"[{processor_id}] Running task {task.get_label()} (attempt {cur_attempts}/{task.dev_attempts})")
                     script_content = await task.run()
+                    logger.info(f"[{processor_id}] Task {task.get_label()} returned, content length: {len(script_content) if script_content else 0}")
                     if not script_content:
                         logger.warning(f"[{processor_id}] returned empty script for task {task.get_label()}")
                         continue
-                    
+
+                    logger.info(f"[{processor_id}] Creating Script object...")
                     script = Script.new(
                         content=script_content,
                         task_label=task.get_label(),
@@ -146,6 +149,7 @@ class TaskBoard:
                         workdir=workdir,
                         max_exec=task.max_exec,
                     )
+                    logger.info(f"[{processor_id}] Submitting script {script.sha256[:8]}...")
                     await submit_script_async_fn(script)
                     logger.info(f"[{processor_id}] Generated and submitted script {script.file_path}")
                     break

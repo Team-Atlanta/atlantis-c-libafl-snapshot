@@ -71,7 +71,7 @@ class OpenAICodex:
         cmd = self._build_command(prompt)
         last_stdout = ""
         os.environ["OPENAI_API_KEY"] = os.environ["LITELLM_KEY"]
-        os.environ["OPENAI_BASE_URL"] = os.environ["AIXCC_LITELLM_HOSTNAME"]
+        os.environ["OPENAI_BASE_URL"] = os.environ["LITELLM_URL"]
 
         for attempt in range(max_retries):
             stdout, stderr = run_command(cmd, cwd=self.config.cwd, env=os.environ)

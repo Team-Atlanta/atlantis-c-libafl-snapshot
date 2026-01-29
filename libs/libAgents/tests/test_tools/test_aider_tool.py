@@ -7,7 +7,7 @@ from aider.models import Model
 
 
 os_env_patch = {
-    "OPENAI_API_BASE": os.getenv("AIXCC_LITELLM_HOSTNAME"),
+    "OPENAI_API_BASE": os.getenv("LITELLM_URL"),
     "OPENAI_API_KEY": os.getenv("LITELLM_KEY"),
 }
 

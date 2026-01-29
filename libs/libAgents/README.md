@@ -8,7 +8,7 @@ system for [oss-fuzz](https://github.com/google/oss-fuzz) projects. The library 
 
 ```python
 # setup LiteLLM envs
-# export AIXCC_LITELLM_HOSTNAME=<our-litellm-proxy>
+# export LITELLM_URL=<our-litellm-proxy>
 # export LITELLM_KEY=sk-xxxx
 # (optional) export DEFAULT_MODEL=gpt-4.1
 

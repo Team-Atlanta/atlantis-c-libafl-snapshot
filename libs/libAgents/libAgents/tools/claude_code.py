@@ -1,8 +1,8 @@
 import os
 import logging
 from pathlib import Path
-from claude_code_sdk import query, ClaudeCodeOptions, Message, AssistantMessage, TextBlock, ResultMessage
-from claude_code_sdk._errors import CLIJSONDecodeError
+from claude_agent_sdk import query, ClaudeAgentOptions, Message, AssistantMessage, TextBlock, ResultMessage
+from claude_agent_sdk._errors import CLIJSONDecodeError
 from libAgents.utils import environs, async_run_cmd, cd
 from dataclasses import dataclass
 from typing import Optional, List
@@ -50,7 +50,7 @@ class ClaudeCodeCLI:
     async def async_query(self, prompt: str, args: Optional[List[str]] = None):
         cmd = self._build_command(prompt, args)
         res = await async_run_cmd(cmd, env={
-            "ANTHROPIC_BASE_URL": os.environ["AIXCC_LITELLM_HOSTNAME"],
+            "ANTHROPIC_BASE_URL": os.environ["LITELLM_URL"],
             "ANTHROPIC_AUTH_TOKEN": os.environ["LITELLM_KEY"]
         })
         if res.returncode != 0:
@@ -90,16 +90,16 @@ class ClaudeCode:
         When the user ask you to write codes, you prefer write it in a copy-pasteable self-contained python script and print the result to the console.
         """
     
-    def _build_options(self) -> ClaudeCodeOptions:
-        options = ClaudeCodeOptions(
+    def _build_options(self) -> ClaudeAgentOptions:
+        options = ClaudeAgentOptions(
             cwd=self.cwd,
-            append_system_prompt=self._build_system_prompt(),
+            system_prompt=self._build_system_prompt(),
             permission_mode="default", # or bypassPermissions
         )
         return options
 
     async def async_query(self, prompt: str,  max_retries: int = 3):
-        with environs({"ANTHROPIC_BASE_URL": os.environ["AIXCC_LITELLM_HOSTNAME"], "ANTHROPIC_AUTH_TOKEN": os.environ["LITELLM_KEY"]}):
+        with environs({"ANTHROPIC_BASE_URL": os.environ["LITELLM_URL"], "ANTHROPIC_AUTH_TOKEN": os.environ["LITELLM_KEY"]}):
             messages: list[Message] = []
             res = None
             options = self._build_options()

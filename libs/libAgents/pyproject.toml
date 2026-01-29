@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "aider-chat>=0.83.2",
     "aiofiles>=24.1.0",
-    "claude-code-sdk",
+    "claude-agent-sdk",
     "code-browser-client @ git+ssh://git@github.com/Team-Atlanta/userspace-code-browser.git#subdirectory=python-client",
     "diskcache>=5.6.3",
     "dotenv>=0.9.9",
@@ -34,4 +34,4 @@ where = ["."]
 include = ["libAgents*"]
 
 [tool.uv.sources]
-claude-code-sdk = { git = "ssh://git@github.com/Team-Atlanta/claude-code-sdk-python.git" }
+claude-agent-sdk = { git = "ssh://git@github.com/Team-Atlanta/claude-code-sdk-python.git" }

@@ -24,7 +24,7 @@ litellm.set_verbose = False
 logger = logging.getLogger(__name__)
 
 LITELLEM_KEY = os.environ["LITELLM_KEY"]
-LITELLEM_BASE_URL = os.environ["AIXCC_LITELLM_HOSTNAME"]
+LITELLEM_BASE_URL = os.environ["LITELLM_URL"]
 
 def get_max_tokens(model: str) -> int:
     max_tokens_map = {

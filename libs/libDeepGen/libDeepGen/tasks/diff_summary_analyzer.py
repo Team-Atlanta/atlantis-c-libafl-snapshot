@@ -43,6 +43,9 @@ class DiffSummaryAnalyzer(Task):
             cache_expire_time=self.cache_expire_time,
         )
         final_result = await agent.run()
+        if final_result is None:
+            logger.warning("Agent returned None (likely timeout)")
+            return None, self.token_cost
         checker = ScriptChecker(model=self.model, script_content=final_result)
         fixed_script = await checker.check()
         logger.info(f"final_result for DiffSummaryAnalyzer : {final_result}")

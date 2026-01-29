@@ -751,12 +751,14 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
             self.stop_event.wait(self.info_interval) # wakes up when stop_event is set
 
 
-def parse_cpuset(env_var_name='CPUSET_CPUS'):
+def parse_cpuset(env_var_name='FUZZER_CPUS'):
     """Parse a cpuset environment variable and return 0-indexed core IDs.
 
     LibAFL's Launcher requires core IDs that are valid from the container's
     perspective. When Docker constrains to a cpuset (e.g., 9-11), the container
     still sees cores as 0, 1, 2 internally for affinity purposes.
+
+    Uses FUZZER_CPUS (set by start.sh) or falls back to CPUSET_CPUS.
 
     Args:
         env_var_name: Name of the environment variable to parse
@@ -767,7 +769,9 @@ def parse_cpuset(env_var_name='CPUSET_CPUS'):
     Raises:
         ValueError: If the env var contains invalid characters
     """
-    cpuset_str = os.getenv("CPUSET_CPUS", "0")
+    # FUZZER_CPUS is set by start.sh with the fuzzer's share of CPUs
+    # Fall back to CPUSET_CPUS for backwards compatibility
+    cpuset_str = os.getenv("FUZZER_CPUS") or os.getenv("CPUSET_CPUS", "0")
 
     # Assert only contains numbers and commas
     if not all(c.isdigit() or c == ',' for c in cpuset_str):
@@ -787,7 +791,7 @@ def parse_cpuset(env_var_name='CPUSET_CPUS'):
 def run(harness):
     work_dir_path = Path("/out")
     cores = parse_cpuset()
-    logging.info(f"Running with {len(cores)} cores")
+    logging.info(f"Fuzzer CPUs: {cores} ({len(cores)} cores)")
     fuzzer = LibAFLFuzzerSession(cores, harness, work_dir_path)
     fuzzer.run()
     # Monitor fuzzer process and restart if it exits

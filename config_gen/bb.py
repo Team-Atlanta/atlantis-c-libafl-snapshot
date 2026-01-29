@@ -20,6 +20,7 @@ VALID_TARGET_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
 BLOCKLISTED_TARGET_NAME_REGEX = re.compile(r"^(jazzer_driver.*)$")
 
 OUT_DIR = Path("/out")
+ARTIFACTS_DIR = Path("/artifacts")
 
 async def async_run_cmd(
     cmd: list, cwd: str | Path | None = None, env=os.environ, timeout: int | None = None
@@ -145,9 +146,10 @@ if __name__ == '__main__':
 
     harnesses = get_harness_names()
     config = create_conf(harnesses, str(cp_mount_path))
-    with open(OUT_DIR / 'config.json', 'w') as f:
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(ARTIFACTS_DIR / 'config.json', 'w') as f:
         json.dump(config, f)
-    
+
     # Create a single tarball with both /src and cp_mount_path
     def exclude_fuzzers(tarinfo):
         # First exclude the fuzzer directories
@@ -184,7 +186,7 @@ if __name__ == '__main__':
         return tarinfo if any(tarinfo.name.endswith(ext) for ext in allowed_extensions) else None
 
     src_root = "/src-config_gen" # just hardcode it...
-    with tarfile.open(OUT_DIR / 'project.tar.gz', 'w:gz') as tar:
+    with tarfile.open(ARTIFACTS_DIR / 'project.tar.gz', 'w:gz') as tar:
         # Add /src with its full path
         tar.add(src_root, arcname='src', filter=exclude_fuzzers)
         # If cp_mount_path is not inside /src, add it with its full path
