@@ -608,6 +608,12 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
         self.staging_corpus_dir.mkdir(parents=True, exist_ok=True)
         self.staging_povs_dir.mkdir(parents=True, exist_ok=True)
 
+        # Truncate the fuzzer log file to avoid stale data from previous runs
+        if self.fuzzer_log_path.exists():
+            self.info(f"Truncating existing fuzzer log: {self.fuzzer_log_path}")
+            self.fuzzer_log_path.unlink()
+        self.fuzzer_log_path.touch()
+
         # Create artifact directories (where watcher copies to)
         self.corpus_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -746,28 +752,35 @@ class LibAFLFuzzerSession(BaseFuzzerSession):
 
 
 def parse_cpuset(env_var_name='CPUSET_CPUS'):
-    """Parse a cpuset environment variable into a list of integers.
-    
+    """Parse a cpuset environment variable and return 0-indexed core IDs.
+
+    LibAFL's Launcher requires core IDs that are valid from the container's
+    perspective. When Docker constrains to a cpuset (e.g., 9-11), the container
+    still sees cores as 0, 1, 2 internally for affinity purposes.
+
     Args:
         env_var_name: Name of the environment variable to parse
-        
+
     Returns:
-        List of integers representing CPU IDs
-        
+        List of integers representing 0-indexed CPU IDs (0 to N-1)
+
     Raises:
         ValueError: If the env var contains invalid characters
-        KeyError: If the env var is not set
     """
     cpuset_str = os.getenv("CPUSET_CPUS", "0")
-    
+
     # Assert only contains numbers and commas
     if not all(c.isdigit() or c == ',' for c in cpuset_str):
         raise ValueError(f"{env_var_name} must only contain numbers and commas")
-    
-    # Split on commas and convert to integers
-    cpu_list = [int(cpu) for cpu in cpuset_str.split(',')]
-    
-    return cpu_list
+
+    # Count the number of cores specified
+    num_cores = len(cpuset_str.split(','))
+
+    # Return 0-indexed core IDs (0, 1, 2, ..., N-1)
+    # This is required because LibAFL's Launcher uses these IDs for CPU affinity,
+    # and inside a Docker container with cpuset constraints, cores are accessed
+    # via their 0-indexed position, not their host core IDs
+    return list(range(num_cores))
             
             
 # TODO figure out whether input/output corpus is required as interface
@@ -777,8 +790,39 @@ def run(harness):
     logging.info(f"Running with {len(cores)} cores")
     fuzzer = LibAFLFuzzerSession(cores, harness, work_dir_path)
     fuzzer.run()
-    # wait for panic handler to kill fuzzer, otherwise let subprocess cook
+    # Monitor fuzzer process and restart if it exits
+    restart_count = 0
+    max_restarts = 10
+    last_restart_time = time.time()
+    min_restart_interval = 5  # seconds between restarts
+    stable_time_to_reset = 300  # reset restart counter after 5 minutes of stable operation
     while True:
+        if fuzzer.process is not None and fuzzer.process.poll() is not None:
+            # Fuzzer process exited
+            exit_code = fuzzer.process.returncode
+            current_time = time.time()
+
+            # Reset restart count if fuzzer ran stably for a while
+            if current_time - last_restart_time > stable_time_to_reset:
+                restart_count = 0
+
+            logging.error(f"Fuzzer process exited with code {exit_code}")
+            restart_count += 1
+            if restart_count > max_restarts:
+                logging.error(f"Fuzzer has restarted {max_restarts} times, giving up")
+                break
+
+            # Wait a bit before restarting to avoid rapid restart loops
+            time_since_last = current_time - last_restart_time
+            if time_since_last < min_restart_interval:
+                time.sleep(min_restart_interval - time_since_last)
+
+            logging.info(f"Restarting fuzzer (attempt {restart_count}/{max_restarts})...")
+            last_restart_time = time.time()
+
+            # Re-run the fuzzer
+            fuzzer = LibAFLFuzzerSession(cores, harness, work_dir_path)
+            fuzzer.run()
         time.sleep(1)
 
 
