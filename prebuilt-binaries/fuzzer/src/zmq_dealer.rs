@@ -340,28 +340,36 @@ async fn zmq_loop_async(
                                     }
                                 };
 
-                                for seed_id in bundle.seed_ids {
-                                    match consumer.get_seed_content(seed_id) {
+                                let mut seeds_queued = 0;
+                                for seed_id in &bundle.seed_ids {
+                                    match consumer.get_seed_content(*seed_id) {
                                         Ok(content) if !content.is_empty() => {
+                                            let sha256_hex = calculate_sha256_hex(&content);
+                                            let content_len = content.len();
                                             if seed_sender.send(content).is_err() {
                                                 error!("Seed queue closed, stopping.");
                                                 stop_flag.store(true, Ordering::Release);
                                                 return Err(Error::SendError("Seed queue closed".into()));
                                             }
+                                            seeds_queued += 1;
+                                            debug!("[ZMQ-RECV] Seed queued for fuzzer: hash={} len={}", sha256_hex, content_len);
                                         }
                                         Ok(_) => {
                                             warn!(
-                                                "Empty seed content for shm: {}, seed_id: {}",
+                                                "[ZMQ-RECV] Empty seed content for shm: {}, seed_id: {}",
                                                 bundle.shm_name, seed_id
                                             );
                                         }
                                         Err(e) => {
                                             error!(
-                                                "Error getting seed content for seed_id {} from {}: {}",
+                                                "[ZMQ-RECV] Error getting seed content for seed_id {} from {}: {}",
                                                 seed_id, bundle.shm_name, e
                                             );
                                         }
                                     }
+                                }
+                                if seeds_queued > 0 {
+                                    info!("[ZMQ-RECV] {} seeds queued from script_id={}", seeds_queued, bundle.script_id);
                                 }
 
                                 let mut ack_msg = ZmqMessage::from("ACK".as_bytes().to_vec());

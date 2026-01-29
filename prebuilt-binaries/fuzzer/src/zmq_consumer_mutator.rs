@@ -95,16 +95,20 @@ where
             .try_iter()
             .filter_map(|seed| {
                 if seed.is_empty() {
-                    // debug!(">>> MAIN CHECK: EMPTY SEED");
+                    debug!("[ZMQ] Received empty seed, skipping");
                     None
                 } else {
-                    // let sha256_hex = calculate_sha256_hex(&seed);
-                    // let seed_string = String::from_utf8_lossy(&seed);
-                    // info!(">>> MAIN CHECK: {} (decoded: {:?})",  sha256_hex, seed_string);
+                    let sha256_hex = calculate_sha256_hex(&seed);
+                    let seed_len = seed.len();
+                    info!("[ZMQ-FUZZ] Seed entering fuzzing loop: hash={} len={}", sha256_hex, seed_len);
                     Some(I::from(seed))
                 }
             })
             .collect();
+
+        if !new_inputs.is_empty() {
+            info!("[ZMQ-FUZZ] {} seeds fed into fuzzing loop this iteration", new_inputs.len());
+        }
 
         Ok(new_inputs)
     }
