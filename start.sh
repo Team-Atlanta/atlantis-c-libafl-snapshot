@@ -6,6 +6,20 @@ set -e
 # Add /crs to Python path so deepgen_service can be imported as a module
 export PYTHONPATH="/crs:${PYTHONPATH:-}"
 
+# ============================================================================
+# LiteLLM API configuration
+# Export LITELLM_KEY as ANTHROPIC_API_KEY for litellm's anthropic provider
+# ============================================================================
+if [ -n "$LITELLM_KEY" ]; then
+    export ANTHROPIC_API_KEY="$LITELLM_KEY"
+fi
+if [ -n "$LITELLM_URL" ]; then
+    export ANTHROPIC_BASE_URL="$LITELLM_URL"
+fi
+
+# Reduce libAgents logging verbosity (only show warnings and errors)
+export LIBAGENTS_LOG_LEVEL="${LIBAGENTS_LOG_LEVEL:-WARNING}"
+
 # Configuration
 SERVICE_PORT=${SERVICE_PORT:-8000}
 SERVICE_HOST=${SERVICE_HOST:-0.0.0.0}

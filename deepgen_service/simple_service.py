@@ -22,6 +22,22 @@ from libDeepGen.tasks.harness_seedgen import AnyHarnessSeedGen
 from libDeepGen.tasks.diff import DiffAnalysisTask
 from libAgents.utils import Project
 
+# ============================================================================
+# Configure logging levels based on LIBAGENTS_LOG_LEVEL environment variable
+# This reduces verbosity of libAgents (which logs full prompts by default)
+# ============================================================================
+_log_level_str = os.environ.get("LIBAGENTS_LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_str, logging.INFO)
+
+# Set logging level for libAgents and its submodules
+logging.getLogger("libAgents").setLevel(_log_level)
+logging.getLogger("libDeepGen").setLevel(_log_level)
+# Reduce litellm verbosity (it logs a lot of debug info)
+logging.getLogger("litellm").setLevel(max(_log_level, logging.WARNING))
+logging.getLogger("LiteLLM").setLevel(max(_log_level, logging.WARNING))
+# Reduce httpx verbosity (used by litellm)
+logging.getLogger("httpx").setLevel(max(_log_level, logging.WARNING))
+
 logger = logging.getLogger(__name__)
 
 # ============================================================================
@@ -160,15 +176,35 @@ class LLMGenerationResponse(BaseModel):
 
 
 # ============================================================================
-# Script Counting Submit wrapper
+# Script Counting Submit wrapper with observability
 # ============================================================================
 class SeedCountingZeroMQSubmit(ZeroMQSubmit):
-    """ZeroMQ submit with seed counting"""
+    """ZeroMQ submit with seed counting and observability logging."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.total_seeds_sent = 0
+        self.seeds_by_script = {}  # script_hash -> seed_count
 
     async def request_seed_submit(self, proc_id, script_id, script, seed_ids):
+        """Track and log seed submissions for observability."""
         await super().request_seed_submit(proc_id, script_id, script, seed_ids)
         if seed_ids:
-            logger.info(f"Script {script.sha256[:8]} generated {len(seed_ids)} seeds via {proc_id}")
+            seed_count = len(seed_ids)
+            self.total_seeds_sent += seed_count
+            script_hash = script.sha256[:8]
+
+            # Track per-script seed counts
+            if script_hash not in self.seeds_by_script:
+                self.seeds_by_script[script_hash] = 0
+            self.seeds_by_script[script_hash] += seed_count
+
+            # Log seed submission with observability info
+            logger.info(
+                f"[SEEDS] Script {script_hash} -> {seed_count} seeds sent to fuzzer "
+                f"(script_total={self.seeds_by_script[script_hash]}, "
+                f"all_scripts_total={self.total_seeds_sent})"
+            )
 
 
 # ============================================================================
@@ -298,9 +334,11 @@ async def lifespan(app: FastAPI):
             logger.info("=" * 40)
 
             # Always submit AnyHarnessSeedGen task (works for both modes)
-            logger.info("AUTO-TRIGGER: Submitting LLM harness analysis task")
+            logger.info("[LLM-TASK] AUTO-TRIGGER: Submitting LLM harness analysis task")
             try:
                 weighted_models = parse_weighted_models(os.environ.get("LLM_MODELS", "claude-sonnet-4-20250514:1"))
+                models_str = ", ".join(weighted_models.keys())
+                logger.info(f"[LLM-TASK] Using models: {models_str}")
                 task = AnyHarnessSeedGen(
                     project_bundle=project,
                     harness_name=target_harness,
@@ -311,14 +349,15 @@ async def lifespan(app: FastAPI):
                     num_repeat=1,
                 )
                 task_id = await engine.add_task(task)
-                logger.info(f"AUTO-TRIGGER: Submitted LLM task for harness '{target_harness}' (task_id={task_id})")
+                logger.info(f"[LLM-TASK] AUTO-TRIGGER: Submitted LLM task for harness '{target_harness}' (task_id={task_id})")
             except Exception as e:
                 logger.error(f"AUTO-TRIGGER: Failed to submit LLM task for '{target_harness}': {e}")
 
             # Additionally submit DiffAnalysisTask if in delta mode
             if project.ref_diff:
-                logger.info("AUTO-TRIGGER: ref.diff detected, also submitting diff analysis task")
+                logger.info("[LLM-TASK] AUTO-TRIGGER: ref.diff detected, also submitting diff analysis task")
                 model = os.environ.get("LLM_MODELS", "claude-sonnet-4-20250514").split(":")[0]
+                logger.info(f"[LLM-TASK] Diff analysis using model: {model}")
                 try:
                     task = DiffAnalysisTask(
                         project_bundle=project,
@@ -328,7 +367,7 @@ async def lifespan(app: FastAPI):
                         num_repeat=1,
                     )
                     task_id = await engine.add_task(task)
-                    logger.info(f"AUTO-TRIGGER: Submitted diff task for harness '{target_harness}' (task_id={task_id})")
+                    logger.info(f"[LLM-TASK] AUTO-TRIGGER: Submitted diff task for harness '{target_harness}' (task_id={task_id})")
                 except Exception as e:
                     logger.error(f"AUTO-TRIGGER: Failed to submit diff task for '{target_harness}': {e}")
 
@@ -602,11 +641,63 @@ async def get_engine_stats():
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        stats = await engine.dump_statistics()
-        return stats
+        # Build stats from engine's internal state
+        stats = {}
+        async with engine._stat_lock:
+            for script_id, proc_stats in engine.stats.items():
+                script = await engine.get_script(script_id)
+                script_hash = script.sha256 if script else "unknown"
+                script_path = str(script.file_path) if script else "unknown"
+
+                stats[str(script_id)] = {
+                    "script_id": script_id,
+                    "script_hash": script_hash,
+                    "script_path": script_path,
+                    "summary": {
+                        "ttl_execs": proc_stats[("summary", None)]["ttl_execs"],
+                        "ttl_errors": proc_stats[("summary", None)]["ttl_errors"],
+                        "ttl_gen_seeds": proc_stats[("summary", None)]["ttl_gen_seeds"],
+                        "ttl_stored_seeds": proc_stats[("summary", None)]["stored_seeds"],
+                    }
+                }
+        return {"scripts": stats}
     except Exception as e:
         logger.error(f"Error getting engine stats: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting stats: {e}")
+
+
+@app.get("/metrics")
+async def get_metrics():
+    """
+    Get observability metrics for the DeepGen service.
+
+    Returns:
+    - total_seeds_sent: Total seeds sent to fuzzer via ZMQ
+    - seeds_by_script: Seeds sent per script (by hash prefix)
+    - scripts_submitted: Number of scripts submitted via API
+    - llm_generations: Number of LLM generation tasks triggered
+    - active_dealers: Number of connected ZMQ dealers (fuzzers)
+    """
+    if not engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    # Get submit metrics from SeedCountingZeroMQSubmit
+    submit = engine.submit
+    metrics = {
+        "total_seeds_sent": getattr(submit, 'total_seeds_sent', 0),
+        "seeds_by_script": getattr(submit, 'seeds_by_script', {}),
+        "scripts_submitted_via_api": script_submission_count,
+        "llm_generation_tasks": llm_generation_count,
+        "active_dealers": len(getattr(submit, 'dealers', {})),
+        "pending_seeds": len(getattr(submit, 'pending_seeds', {})),
+    }
+
+    # Add script count from engine
+    async with engine._script_lock:
+        metrics["total_scripts_loaded"] = len(engine.scripts)
+        metrics["masked_scripts"] = sum(1 for mask, _, _, _ in engine.scripts.values() if mask)
+
+    return metrics
 
 
 @app.post("/generate_llm", response_model=LLMGenerationResponse)
