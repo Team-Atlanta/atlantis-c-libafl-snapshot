@@ -305,7 +305,7 @@ class DeepSearchAgent(AgentBase):
             await self._handle_beast_mode(session, override_model)
 
         return {
-            "result": session.this_step["action-details"],
+            "result": session.get_action_details(),  # Use method to handle malformed XML
             "context": session.get_context(),
         }
 
@@ -358,7 +358,9 @@ class DeepSearchAgent(AgentBase):
 
             if self.enable_context_saving:
                 await session.save_context(prompt, session.total_step)
-            return True, obj["action-details"]["answer"]
+            # Use get_action_details() to handle malformed XML-style responses
+            action_details = session.get_action_details()
+            return True, action_details.get("answer", "")
 
         except Exception as e:
             logger.error(f"Error in beast mode: {e}")
@@ -369,7 +371,7 @@ class DeepSearchAgent(AgentBase):
                 "action-details": {"answer": None},
             }
             session.this_step = obj
-            return False, obj["action-details"]["answer"]
+            return False, None
 
 
 class DeepThinkAgent(AgentBase):

@@ -204,11 +204,43 @@ class ResearchSession:
         details = self.this_step.get("action-details", {})
         # Defensive check: ensure action-details is a dict
         if not isinstance(details, dict):
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"action-details is not a dict: {type(details)} - {details}")
+            # Try to extract content from malformed XML-style output
+            # e.g. '<parameter name="answer">actual content</parameter>'
+            if isinstance(details, str):
+                logger.warning(f"action-details is string, attempting extraction: {details[:100]}...")
+                extracted = self._extract_from_malformed_xml(details)
+                if extracted:
+                    return extracted
+            logger.warning(f"action-details is not a dict and couldn't be extracted: {type(details)}")
             return {}
         return details
+
+    def _extract_from_malformed_xml(self, text: str) -> Dict[str, Any]:
+        """Try to extract parameters from malformed XML-style action-details."""
+        import re
+        result = {}
+
+        # Try to find <parameter name="X">content</parameter> pattern
+        param_pattern = r'<parameter name="([^"]+)">(.*?)(?:</parameter>|$)'
+
+        # Find FIRST <script> and LAST </script> to get the wrapper tags
+        # (the code inside might contain HTML <script> tags as string literals)
+        first_script_start = text.find("<script>")
+        last_script_end = text.rfind("</script>")
+        if first_script_start != -1 and last_script_end != -1 and last_script_end > first_script_start:
+            # Extract including the tags for _post_process
+            script_content = text[first_script_start:last_script_end + len("</script>")]
+            result["answer"] = script_content
+            logger.info(f"Extracted script from malformed action-details ({len(result['answer'])} chars)")
+            return result
+
+        # Try parameter pattern
+        matches = re.findall(param_pattern, text, re.DOTALL)
+        for name, content in matches:
+            result[name] = content.strip()
+            logger.info(f"Extracted parameter '{name}' from malformed action-details")
+
+        return result
 
     def get_action_param(self, param_name: str, default: Any = None) -> Any:
         """Get a parameter from the action-details of the current step."""

@@ -94,7 +94,7 @@ class FsReaderPlugin(ActionPlugin):
         Handle the template task.
         """
         file_path = session.get_action_param("file_path")
-        mode = session.get_action_param("mode")
+        mode = session.get_action_param("mode", "text") or "text"  # Default to text mode
 
         if not file_path or not Path(file_path).exists():
             logger.debug(

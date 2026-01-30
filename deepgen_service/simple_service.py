@@ -29,15 +29,30 @@ from libAgents.utils import Project
 _log_level_str = os.environ.get("LIBAGENTS_LOG_LEVEL", "INFO").upper()
 _log_level = getattr(logging, _log_level_str, logging.INFO)
 
-# Configure basic logging early so all child loggers get handlers
+# Configure basic logging early - force it to add handler to root
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True,  # Force reconfiguration even if already configured
 )
 
-# Set logging level for libAgents and its submodules
-logging.getLogger("libAgents").setLevel(_log_level)
-logging.getLogger("libDeepGen").setLevel(_log_level)
+# Explicitly add stream handler to libDeepGen and libAgents loggers
+# This ensures they log even if root logger is reconfigured later
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+_handler.setLevel(logging.INFO)
+
+# Configure parent loggers to handle all child logger output
+for _logger_name in ["libAgents", "libDeepGen"]:
+    _lib_logger = logging.getLogger(_logger_name)
+    _lib_logger.setLevel(_log_level)
+    _lib_logger.addHandler(_handler)
+    _lib_logger.propagate = False  # Don't duplicate to root
+
+# Also configure specific libDeepGen child loggers that might be initialized early
+for _child_logger_name in ["libDeepGen.engine", "libDeepGen.executor.executor", "libDeepGen.tasks.task_board"]:
+    _child_logger = logging.getLogger(_child_logger_name)
+    _child_logger.setLevel(_log_level)
 # Reduce litellm verbosity (it logs a lot of debug info)
 logging.getLogger("litellm").setLevel(max(_log_level, logging.WARNING))
 logging.getLogger("LiteLLM").setLevel(max(_log_level, logging.WARNING))
@@ -325,8 +340,16 @@ async def lifespan(app: FastAPI):
         await engine.__aenter__()
         logger.info("DeepGenEngine initialized and ready")
 
-        # Start engine in background
-        asyncio.create_task(engine.run())
+        # Start engine in background with error handling
+        async def run_engine_with_logging():
+            try:
+                logger.info("Engine background task: Starting engine.run()")
+                await engine.run()
+                logger.info("Engine background task: engine.run() completed")
+            except Exception as e:
+                logger.error(f"Engine background task FAILED: {e}", exc_info=True)
+
+        asyncio.create_task(run_engine_with_logging())
         logger.info("DeepGenEngine background task started")
 
     except Exception as e:

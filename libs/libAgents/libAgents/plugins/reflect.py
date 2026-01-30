@@ -59,7 +59,18 @@ class ReflectPlugin(ActionPlugin):
     @override
     async def handle(self, session: ResearchSession, current_question: str) -> bool:
         """Handle the reflect action."""
-        questions_to_answer = session.get_action_param("questionsToAnswer")
+        questions_to_answer = session.get_action_param("questionsToAnswer", [])
+        # Handle case where LLM returns a string instead of a list
+        if isinstance(questions_to_answer, str):
+            # Try to parse as JSON array or split by newlines
+            import json
+            try:
+                questions_to_answer = json.loads(questions_to_answer)
+            except (json.JSONDecodeError, TypeError):
+                # Split by newlines if it's a plain string
+                questions_to_answer = [q.strip() for q in questions_to_answer.split('\n') if q.strip()]
+        if not isinstance(questions_to_answer, list):
+            questions_to_answer = []
         questions_to_answer_copy = questions_to_answer.copy()
         deduped = await dedup_queries(
             new_queries=questions_to_answer,

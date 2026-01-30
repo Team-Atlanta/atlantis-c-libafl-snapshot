@@ -85,7 +85,7 @@ class ListDirPlugin(ActionPlugin):
         """
         action = session.get_action_details()
         dir_path = action.get("dir_path", "")
-        option = action.get("option", "")
+        option = action.get("option", "none") or "none"  # default to "none" if empty/None
 
         if not dir_path:
             logger.warning("ListDirPlugin: dir_path is required")

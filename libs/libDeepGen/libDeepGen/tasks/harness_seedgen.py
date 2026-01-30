@@ -7,11 +7,8 @@ from libAgents.plugins import (
     AnswerPlugin,
     ReflectPlugin,
     CodeBrowserPlugin,
-    CoderPlugin,
     ListDirPlugin,
     FsReaderPlugin,
-    RipGrepPlugin,
-    SedPlugin,
 )
 
 from .task_base import Task
@@ -22,21 +19,19 @@ logger = logging.getLogger(__name__)
 
 class HarnessAgent(AgentBase):
     """
-    An agent with full plugins support and agent flow support.
+    An agent with simplified plugins for direct script generation.
+
+    Uses only essential plugins (no aider/CoderPlugin) - the LLM outputs
+    the script directly in its answer wrapped in <script> tags.
     """
     def __init__(self, model: str, project_bundle: Project, is_jvm: bool, timeout: int = 300):
-        plugins=[
-                AnswerPlugin(),
-                ReflectPlugin(),
-                RipGrepPlugin(),
-                SedPlugin(),
-                CoderPlugin(
-                    project_name=project_bundle.name,
-                    main_repo=project_bundle.repo_path,
-                ),
-                ListDirPlugin(),
+        plugins = [
+            AnswerPlugin(),
+            ReflectPlugin(),
+            ListDirPlugin(),
             FsReaderPlugin(),
         ]
+        # Add CodeBrowserPlugin for C/C++ projects (provides AST-based code navigation)
         if not is_jvm:
             plugins.append(
                 CodeBrowserPlugin(
@@ -130,7 +125,7 @@ SCRIPT USAGE GUIDE:
 
 CRITICAL REQUIREMENTS:
 - There can be multiple fuzzing harnesses in the project, you only need to focus on the one provided in {fuzzing_harness_path}.
-- After the analysis we mentioned in <HARNESS ANALYSIS GUIDANCE>, use the AI coder to generate the script.
+- After analyzing the harness, output the complete Python script directly in your final answer.
 - The script must implement a function named `gen_one_seed` that returns a seed for the fuzzing harness in bytes. An example is shown below.
 
 <example>
@@ -213,13 +208,18 @@ if __name__ == "__main__":
         return None
 
     async def _post_process(self, input_text) -> str:
-        # First try to extract from <script> tags
+        # First try to extract from <script> tags in the input text
+        # Use rfind for </script> to find the LAST occurrence (the wrapper closing tag)
+        # because the code inside might contain HTML <script> tags as string literals
         if input_text:
             script_start = input_text.find("<script>")
-            script_end = input_text.find("</script>")
-            if script_start != -1 and script_end != -1:
+            script_end = input_text.rfind("</script>")  # Use rfind for last occurrence
+            if script_start != -1 and script_end != -1 and script_end > script_start:
                 # Return the extracted script content directly
-                return input_text[script_start + len("<script>"):script_end].strip()
+                script_content = input_text[script_start + len("<script>"):script_end].strip()
+                if "def gen_one_seed" in script_content:
+                    logger.info(f"Found script in <script> tags ({len(script_content)} chars)")
+                    return script_content
 
         # If no <script> tags found, search for generated files
         # This handles the case where aider writes files directly without wrapping in tags
