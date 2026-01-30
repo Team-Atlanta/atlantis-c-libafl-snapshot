@@ -173,6 +173,9 @@ async def evaluate_answer(
             return obj
 
     # If all evaluations pass, return the last result
+    # Ensure we never return None
+    if result is None:
+        return {"pass": True, "type": "default", "think": "No evaluation criteria applied"}
     return result
 
 

@@ -248,15 +248,20 @@ The evaluator thinks your answer is bad because:
                 all_knowledge=session.knowledge_manager.get_knowledge_str(),
                 override_model=session.override_model,
             )
+            # Defensive check: ensure evaluation is a dict
+            if evaluation is None or not isinstance(evaluation, dict):
+                logger.error(f"Invalid evaluation result (expected dict): {type(evaluation)} - {evaluation}")
+                evaluation = {"pass": False, "type": "error", "think": "Evaluation returned invalid result"}
             # debug check
-            if evaluation["type"] not in [
+            elif evaluation.get("type") not in [
                 "definitive",
                 "freshness",
                 "plurality",
                 "completeness",
                 "strict",
+                "error",
             ]:
-                logger.error(f"Invalid evaluation type: {evaluation['type']}")
+                logger.error(f"Invalid evaluation type: {evaluation.get('type')}")
         else:
             evaluation = {"pass": True, "think": ""}
 

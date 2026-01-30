@@ -201,7 +201,14 @@ class ResearchSession:
 
     def get_action_details(self) -> Dict[str, Any]:
         """Get the action details of the current step."""
-        return self.this_step.get("action-details", {})
+        details = self.this_step.get("action-details", {})
+        # Defensive check: ensure action-details is a dict
+        if not isinstance(details, dict):
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"action-details is not a dict: {type(details)} - {details}")
+            return {}
+        return details
 
     def get_action_param(self, param_name: str, default: Any = None) -> Any:
         """Get a parameter from the action-details of the current step."""
