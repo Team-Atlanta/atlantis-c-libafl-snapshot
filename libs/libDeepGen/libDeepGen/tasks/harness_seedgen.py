@@ -163,12 +163,72 @@ if __name__ == "__main__":
             harness_entrypoint_func=self.harness_entrypoint_func
         )
 
+    def _find_generated_script(self) -> str | None:
+        """Search for generated Python scripts containing gen_one_seed function."""
+        search_paths = [
+            self.project_bundle.repo_path,
+            self.project_bundle.project_path,
+        ]
+        # Also check parent directories (aider may write to working_dir parent)
+        if self.project_bundle.repo_path:
+            search_paths.append(self.project_bundle.repo_path.parent)
+        if self.project_bundle.project_path:
+            search_paths.append(self.project_bundle.project_path.parent)
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_paths = []
+        for p in search_paths:
+            if p and p not in seen:
+                seen.add(p)
+                unique_paths.append(p)
+
+        logger.info(f"Searching for generated scripts in paths: {unique_paths}")
+
+        for search_path in unique_paths:
+            if not search_path or not search_path.exists():
+                logger.debug(f"Path does not exist: {search_path}")
+                continue
+
+            # Look for recently created .py files
+            try:
+                py_files = list(search_path.rglob("*.py"))
+                logger.debug(f"Found {len(py_files)} .py files in {search_path}")
+                # Sort by modification time (newest first)
+                py_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+
+                for py_file in py_files[:20]:  # Check up to 20 most recent files
+                    try:
+                        content = py_file.read_text()
+                        if "def gen_one_seed" in content:
+                            logger.info(f"Found generated script at: {py_file}")
+                            return content
+                    except Exception as e:
+                        logger.debug(f"Error reading {py_file}: {e}")
+                        continue
+            except Exception as e:
+                logger.debug(f"Error searching {search_path}: {e}")
+                continue
+
+        return None
+
     async def _post_process(self, input_text) -> str:
-        script_start = input_text.find("<script>")
-        script_end = input_text.find("</script>")
-        if script_start != -1 and script_end != -1:
-            # Return the extracted script content directly
-            return input_text[script_start + len("<script>"):script_end].strip()
+        # First try to extract from <script> tags
+        if input_text:
+            script_start = input_text.find("<script>")
+            script_end = input_text.find("</script>")
+            if script_start != -1 and script_end != -1:
+                # Return the extracted script content directly
+                return input_text[script_start + len("<script>"):script_end].strip()
+
+        # If no <script> tags found, search for generated files
+        # This handles the case where aider writes files directly without wrapping in tags
+        logger.info("No <script> tags found in answer, searching for generated script files...")
+        generated_script = self._find_generated_script()
+        if generated_script:
+            return generated_script
+
+        logger.warning("No script found in answer or generated files")
         return None
 
     async def _run_impl(self) -> (str, int):

@@ -29,6 +29,12 @@ from libAgents.utils import Project
 _log_level_str = os.environ.get("LIBAGENTS_LOG_LEVEL", "INFO").upper()
 _log_level = getattr(logging, _log_level_str, logging.INFO)
 
+# Configure basic logging early so all child loggers get handlers
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+)
+
 # Set logging level for libAgents and its submodules
 logging.getLogger("libAgents").setLevel(_log_level)
 logging.getLogger("libDeepGen").setLevel(_log_level)
