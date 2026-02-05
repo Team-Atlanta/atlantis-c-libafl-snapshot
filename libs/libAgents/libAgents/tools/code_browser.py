@@ -57,21 +57,23 @@ def _is_alive(pid: int) -> bool:
 def _check_grpc(addr: str, port: int, retries: int = 200, delay: float = 1) -> bool:
     target = f"{addr}:{port}"
     last_exception = None
+    logger.info(f"[CodeBrowser] GRPC check starting for {target} (retries={retries}, delay={delay}s)")
     for i in range(retries):
         try:
             CodeBrowserClient(target)
-            logger.debug(f"GRPC check attempt {i + 1}/{retries} succeeded for {target}")
+            logger.info(f"[CodeBrowser] GRPC check attempt {i + 1}/{retries} succeeded for {target}")
             return True
         except Exception as e:
             last_exception = e
-            # traceback.print_exc(file=sys.stderr)
+            if i == 0 or (i + 1) % 10 == 0:  # Log first attempt and every 10th
+                logger.warning(f"[CodeBrowser] GRPC check attempt {i + 1}/{retries} failed for {target}: {e}")
             time.sleep(delay)
 
     logger.error(
-        f"GRPC check failed for {target} after {retries} attempts (interval: {delay}s)"
+        f"[CodeBrowser] GRPC check failed for {target} after {retries} attempts (interval: {delay}s)"
     )
     if last_exception:
-        logger.error(f"Last error: {last_exception}")
+        logger.error(f"[CodeBrowser] Last error: {last_exception}")
     return False
 
 
@@ -134,16 +136,20 @@ class CodeBrowser:
         self.src_path = os.path.realpath(src_path)  # make sure a real path
         self.daemon = os.environ.get("CODE_BROWSER_ADDRESS", None)
         self.server_port = None
+        self.server_pid = None
+        self.server_address = None
 
-        # self.db_client = CodeBrowserClient("127.0.0.1:8848")
+        logger.info(f"[CodeBrowser] Initializing for project={project_name}, src_path={self.src_path}")
+        logger.info(f"[CodeBrowser] CODE_BROWSER_ADDRESS={self.daemon}")
 
         if self.daemon is None:
+            logger.info("[CodeBrowser] Using self-managed server mode")
             _cleanup_stale()
             self._ensure_server()
             # register finalize to auto shutdown on GC
             weakref.finalize(self, self.shutdown)
             self._lock_acquired = False
-            logger.info("Code browser client initialized with self-managed server")
+            logger.info(f"[CodeBrowser] Client initialized with self-managed server on port {self.server_port}, pid={self.server_pid}")
         else:
             cnt = 0
             while cnt < 120:
@@ -220,13 +226,16 @@ class CodeBrowser:
     def _start_server(self):
         address = "127.0.0.1"
         port = _allocate_port(address)
+        logger.info(f"[CodeBrowser] Starting server on {address}:{port} for {self.src_path}")
         proc = subprocess.Popen(
             ["code-browser-server", "-p", self.src_path, "-a", f"{address}:{port}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
+        logger.info(f"[CodeBrowser] Server process started with PID {proc.pid}")
         if not _check_grpc(address, port):
+            logger.error(f"[CodeBrowser] Server failed to respond on {address}:{port}")
             proc.terminate()
             try:
                 out, err = proc.communicate(timeout=5)
@@ -234,11 +243,12 @@ class CodeBrowser:
                 proc.kill()
                 out, err = proc.communicate()
                 raise RuntimeError(
-                    f"Failed to start server: communicate timed out. stdout: '{out.strip()}', stderr: '{err.strip()}'"
+                    f"[CodeBrowser] Failed to start server: communicate timed out. stdout: '{out.strip()}', stderr: '{err.strip()}'"
                 )
             raise RuntimeError(
-                f"Failed to start server: stdout: '{out.strip()}', stderr: '{err.strip()}'"
+                f"[CodeBrowser] Failed to start server: stdout: '{out.strip()}', stderr: '{err.strip()}'"
             )
+        logger.info(f"[CodeBrowser] Server started successfully on {address}:{port}, pid={proc.pid}")
         return address, port, proc.pid
 
     def _attach_client(self, addr: str, port: int, pid: int):
@@ -246,6 +256,52 @@ class CodeBrowser:
         self.server_port = port
         self.server_pid = pid
         self.db_client = CodeBrowserClient(f"{addr}:{port}")
+        logger.info(f"[CodeBrowser] Attached client to {addr}:{port}, pid={pid}")
+
+    def _check_and_reconnect(self):
+        """Check if server is alive and reconnect if needed (self-managed mode only)."""
+        if self.daemon is not None:
+            return  # Daemon mode - don't manage reconnection
+
+        if self.server_pid is None:
+            logger.warning("[CodeBrowser] No server PID - cannot check connection")
+            return
+
+        # Check if server process is still alive
+        if not _is_alive(self.server_pid):
+            logger.warning(f"[CodeBrowser] Server process {self.server_pid} is dead, reconnecting...")
+            self._reconnect()
+            return
+
+        # Quick GRPC check
+        if not _check_grpc(self.server_address, self.server_port, retries=1, delay=0.1):
+            logger.warning(f"[CodeBrowser] GRPC check failed for {self.server_address}:{self.server_port}, reconnecting...")
+            self._reconnect()
+
+    def _reconnect(self):
+        """Restart server and reconnect client."""
+        logger.info("[CodeBrowser] Attempting to reconnect...")
+        # Clean up old entry from DB
+        conn = None
+        try:
+            with _file_lock:
+                conn = _init_db()
+                conn.execute("DELETE FROM servers WHERE path = ?", (self.src_path,))
+                conn.commit()
+                logger.info(f"[CodeBrowser] Removed stale entry for {self.src_path}")
+        except Exception as e:
+            logger.error(f"[CodeBrowser] Error cleaning up stale entry: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+        # Start new server
+        try:
+            self._ensure_server()
+            logger.info(f"[CodeBrowser] Reconnected successfully to {self.server_address}:{self.server_port}")
+        except Exception as e:
+            logger.error(f"[CodeBrowser] Failed to reconnect: {e}")
+            raise
 
     def shutdown(self):
         """Terminate the server process and clean registry entry."""
@@ -280,29 +336,61 @@ class CodeBrowser:
         if self.daemon is None:
             self.shutdown()
 
-    # Proxy methods
+    # Proxy methods with auto-reconnection
     def get_function_definition(self, function_name: str):
-        if self.daemon is None:
-            return self.db_client.get_function_definition(function_name)
-        else:
-            return self.db_client.get_function_definition(function_name, self.src_path)
+        self._check_and_reconnect()
+        try:
+            if self.daemon is None:
+                return self.db_client.get_function_definition(function_name)
+            else:
+                return self.db_client.get_function_definition(function_name, self.src_path)
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.UNAVAILABLE and self.daemon is None:
+                logger.warning(f"[CodeBrowser] GRPC unavailable during query, attempting reconnect...")
+                self._reconnect()
+                return self.db_client.get_function_definition(function_name)
+            raise
 
     def get_any_type_definition(self, type_name: str):
-        if self.daemon is None:
-            return self.db_client.get_any_type_definition(type_name)
-        else:
-            return self.db_client.get_any_type_definition(type_name, self.src_path)
+        self._check_and_reconnect()
+        try:
+            if self.daemon is None:
+                return self.db_client.get_any_type_definition(type_name)
+            else:
+                return self.db_client.get_any_type_definition(type_name, self.src_path)
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.UNAVAILABLE and self.daemon is None:
+                logger.warning(f"[CodeBrowser] GRPC unavailable during query, attempting reconnect...")
+                self._reconnect()
+                return self.db_client.get_any_type_definition(type_name)
+            raise
 
     def get_function_cross_references(self, function_name: str):
-        if self.daemon is None:
-            return self.db_client.get_function_cross_references(function_name)
-        else:
-            return self.db_client.get_function_cross_references(
-                function_name, self.src_path
-            )
+        self._check_and_reconnect()
+        try:
+            if self.daemon is None:
+                return self.db_client.get_function_cross_references(function_name)
+            else:
+                return self.db_client.get_function_cross_references(
+                    function_name, self.src_path
+                )
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.UNAVAILABLE and self.daemon is None:
+                logger.warning(f"[CodeBrowser] GRPC unavailable during query, attempting reconnect...")
+                self._reconnect()
+                return self.db_client.get_function_cross_references(function_name)
+            raise
 
     def get_struct_definition(self, struct_name: str):
-        if self.daemon is None:
-            return self.db_client.get_struct_definition(struct_name)
-        else:
-            return self.db_client.get_struct_definition(struct_name, self.src_path)
+        self._check_and_reconnect()
+        try:
+            if self.daemon is None:
+                return self.db_client.get_struct_definition(struct_name)
+            else:
+                return self.db_client.get_struct_definition(struct_name, self.src_path)
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.UNAVAILABLE and self.daemon is None:
+                logger.warning(f"[CodeBrowser] GRPC unavailable during query, attempting reconnect...")
+                self._reconnect()
+                return self.db_client.get_struct_definition(struct_name)
+            raise

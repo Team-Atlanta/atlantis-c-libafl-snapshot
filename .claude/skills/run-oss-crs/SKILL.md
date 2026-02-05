@@ -9,19 +9,33 @@ This skill builds and runs the fuzzer through oss-crs-2.
 
 ## Working Directory
 
-All commands run from `~/post/oss-crs-2`
+All commands run from `$OSS_CRS`.
+If environment variable isn't set, try the following:
+- `~/post/oss-crs-2`
+- `~/projects/oss-crs`
+or crawl to see if you can find a dir.
+
+For oss-fuzz directory, `$OSS_FUZZ`.
+If environment variable isn't set, try the following:
+- `~/post/oss-fuzz-clean`
+- `~/projects/oss-fuzz`
+
+For a cloned project repo, `$PROJECT_CLONE`.
+If environment variable isn't set, try the following:
+- `~/post/clone`
+- `~/clone`
 
 ## Build Command
 
 Build the project using libafl's instrumentation:
 
 ```bash
-cd ~/post/oss-crs-2 && uv run oss-bugfind-crs build \
+cd $OSS_CRS && uv run oss-bugfind-crs build \
     --project-image-prefix aixcc-afc \
-    --oss-fuzz-dir ~/post/oss-fuzz-clean \
+    --oss-fuzz-dir $OSS_FUZZ \
     example_configs/atlantis-c-deepgen \
     aixcc/c/sanity-mock-c-delta-01 \
-    ~/post/clone/mock-c
+    $PROJECT_CLONE/mock-c
 ```
 
 ## Run Command
@@ -29,7 +43,7 @@ cd ~/post/oss-crs-2 && uv run oss-bugfind-crs build \
 Run atlantis-c-libafl + deepgen (requires `.env` with LITELLM_URL and LITELLM_KEY):
 
 ```bash
-cd ~/post/oss-crs-2 && source .env && uv run oss-bugfind-crs run \
+cd $OSS_CRS && source .env && uv run oss-bugfind-crs run \
     --external-litellm \
     example_configs/atlantis-c-deepgen \
     aixcc/c/sanity-mock-c-delta-01 \
@@ -41,9 +55,9 @@ cd ~/post/oss-crs-2 && source .env && uv run oss-bugfind-crs run \
 For bug-finding with a known vulnerable diff:
 
 ```bash
-cd ~/post/oss-crs-2 && source .env && uv run oss-bugfind-crs run \
+cd $OSS_CRS && source .env && uv run oss-bugfind-crs run \
     --external-litellm \
-    --diff ~/post/oss-fuzz-clean/projects/aixcc/c/sanity-mock-c-delta-01/.aixcc/ref.diff \
+    --diff $OSS_FUZZ/projects/aixcc/c/sanity-mock-c-delta-01/.aixcc/ref.diff \
     example_configs/atlantis-c-deepgen \
     aixcc/c/sanity-mock-c-delta-01 \
     fuzz_process_input_header
@@ -72,18 +86,18 @@ The `.env` file in oss-crs-2 should contain:
 Build libxml2:
 
 ```bash
-cd ~/post/oss-crs-2 && uv run oss-bugfind-crs build \
+cd $OSS_CRS && uv run oss-bugfind-crs build \
     --project-image-prefix aixcc-afc \
-    --oss-fuzz-dir ~/post/oss-fuzz-clean \
+    --oss-fuzz-dir $OSS_FUZZ \
     example_configs/atlantis-c-deepgen \
     aixcc/c/afc-libxml2-delta-01 \
-    ~/post/clone/official-afc-libxml2
+    $PROJECT_CLONE/official-afc-libxml2
 ```
 
 Run libxml2 with html harness:
 
 ```bash
-cd ~/post/oss-crs-2 && source .env && uv run oss-bugfind-crs run \
+cd $OSS_CRS && source .env && uv run oss-bugfind-crs run \
     --external-litellm \
     example_configs/atlantis-c-deepgen \
     aixcc/c/afc-libxml2-delta-01 \
@@ -114,14 +128,24 @@ When running the fuzzer:
 4. After confirming success OR after timeout (2 minutes), ask user:
    - "Continue running?" - keep fuzzer going
    - "Stop now?" - stop the container and cleanup
-5. To stop the fuzzer manually, run:
+5. To stop the fuzzer, kill the `oss-bugfind-crs` process (NOT the docker containers directly):
    ```bash
-   docker ps --filter "name=crs-run" -q | xargs -r docker stop
+   pkill -f "oss-bugfind-crs run"
    ```
+   This automatically cleans up containers properly.
 
-## Cleanup Command
+## Stopping the Fuzzer
 
-If containers are left running, clean up with:
+**IMPORTANT:** Always stop by killing the `oss-bugfind-crs` process, not the docker containers:
+```bash
+pkill -f "oss-bugfind-crs run"
+```
+
+The process handles container cleanup automatically. Do NOT run `docker stop` on crs-run containers directly.
+
+## Emergency Cleanup
+
+Only if the process was killed improperly and containers are orphaned:
 ```bash
 docker ps --filter "name=crs-run" -q | xargs -r docker stop
 docker ps --filter "name=crs-run" -aq | xargs -r docker rm

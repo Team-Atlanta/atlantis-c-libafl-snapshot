@@ -226,6 +226,7 @@ TASK:
 - We prefer self-contained scripts, but you can use third-party packages when you have to.
 - If you use third-party packages, make sure you correctly use the APIs.
 - Remember to do auto-testing by running the script to mitigate the import errors and syntax errors.
+- IMPORTANT: Do NOT use `from typing import bytes` - `bytes` is a builtin type in Python 3, not from typing.
 
 ## OUTPUT FORMAT:
 - Show me the generated script enclosed within `<script>` and `</script>` tags:

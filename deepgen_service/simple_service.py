@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import tarfile
+import httpx
 from pathlib import Path
 from typing import Optional
 import psutil
@@ -110,6 +111,118 @@ llm_generation_count = 0
 
 
 # ============================================================================
+# LiteLLM Budget Checker
+# ============================================================================
+class LiteLLMBudgetChecker:
+    """
+    Periodically checks LiteLLM budget and stops the engine when budget is exhausted.
+
+    Uses the /key/info endpoint to check spend vs max_budget.
+    """
+
+    def __init__(self, check_interval: int = 60, budget_margin: float = 1.0):
+        """
+        Args:
+            check_interval: Seconds between budget checks
+            budget_margin: Stop when remaining budget is less than this amount in dollars
+        """
+        self.check_interval = check_interval
+        self.budget_margin = budget_margin
+        self.litellm_url = os.environ.get("LITELLM_URL", "")
+        self.litellm_key = os.environ.get("LITELLM_KEY", "")
+        self.last_spend: Optional[float] = None
+        self.last_max_budget: Optional[float] = None
+        self.budget_exhausted = False
+        self._running = False
+        self._task: Optional[asyncio.Task] = None
+
+    async def check_budget(self) -> tuple[Optional[float], Optional[float], Optional[str]]:
+        """
+        Query LiteLLM /key/info endpoint to get current spend and max budget.
+
+        Returns:
+            tuple of (spend, max_budget, error_message)
+        """
+        if not self.litellm_url or not self.litellm_key:
+            return None, None, "LITELLM_URL or LITELLM_KEY not configured"
+
+        try:
+            url = f"{self.litellm_url.rstrip('/')}/key/info"
+            async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+                response = await client.get(
+                    url,
+                    headers={"Authorization": f"Bearer {self.litellm_key}"}
+                )
+
+                if response.status_code != 200:
+                    return None, None, f"HTTP {response.status_code}: {response.text}"
+
+                data = response.json()
+                info = data.get("info", {})
+                spend = info.get("spend")
+                max_budget = info.get("max_budget")
+
+                if spend is not None and max_budget is not None:
+                    self.last_spend = float(spend)
+                    self.last_max_budget = float(max_budget)
+                    return self.last_spend, self.last_max_budget, None
+                else:
+                    return None, None, f"Missing spend or max_budget in response: {data}"
+
+        except Exception as e:
+            return None, None, f"Error checking budget: {e}"
+
+    async def _check_loop(self, engine_ref: DeepGenEngine):
+        """Background loop that periodically checks budget."""
+        logger.info(f"[BUDGET] Starting budget checker (interval={self.check_interval}s, margin=${self.budget_margin})")
+
+        while self._running:
+            try:
+                spend, max_budget, error = await self.check_budget()
+
+                if error:
+                    logger.warning(f"[BUDGET] Check failed: {error}")
+                else:
+                    remaining = max_budget - spend
+                    logger.info(f"[BUDGET] Spend: ${spend:.2f} / ${max_budget:.2f} (remaining: ${remaining:.2f})")
+
+                    if remaining < self.budget_margin:
+                        logger.warning(f"[BUDGET] Budget exhausted! Remaining ${remaining:.2f} < margin ${self.budget_margin}")
+                        self.budget_exhausted = True
+                        # Signal engine to stop
+                        if engine_ref:
+                            engine_ref._should_exit.store(1)
+                            logger.info("[BUDGET] Signaled engine to stop")
+                        break
+
+            except Exception as e:
+                logger.error(f"[BUDGET] Error in check loop: {e}")
+
+            await asyncio.sleep(self.check_interval)
+
+        logger.info("[BUDGET] Budget checker stopped")
+
+    def start(self, engine_ref: DeepGenEngine):
+        """Start the background budget checker."""
+        if not self.litellm_url or not self.litellm_key:
+            logger.warning("[BUDGET] Skipping budget checker - LITELLM_URL or LITELLM_KEY not configured")
+            return
+
+        self._running = True
+        self._task = asyncio.create_task(self._check_loop(engine_ref))
+
+    def stop(self):
+        """Stop the background budget checker."""
+        self._running = False
+        if self._task:
+            self._task.cancel()
+
+
+# Global budget checker instance
+budget_checker: Optional[LiteLLMBudgetChecker] = None
+
+
+# ============================================================================
 # Request/Response Models
 # ============================================================================
 class ScriptSubmission(BaseModel):
@@ -163,6 +276,11 @@ class ServiceStatus(BaseModel):
     scripts_submitted: int
     llm_generations: int
     workdir: str
+    # LLM budget info
+    llm_budget_spend: Optional[float] = None
+    llm_budget_max: Optional[float] = None
+    llm_budget_remaining: Optional[float] = None
+    llm_budget_exhausted: bool = False
 
 
 class ScriptInfo(BaseModel):
@@ -352,6 +470,14 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(run_engine_with_logging())
         logger.info("DeepGenEngine background task started")
 
+        # Start budget checker to monitor LLM spend
+        global budget_checker
+        budget_checker = LiteLLMBudgetChecker(
+            check_interval=60,  # Check every 60 seconds
+            budget_margin=1.0,  # Stop when less than $1 remaining
+        )
+        budget_checker.start(engine)
+
     except Exception as e:
         logger.error(f"Failed to initialize DeepGenEngine: {e}", exc_info=True)
         raise
@@ -375,7 +501,7 @@ async def lifespan(app: FastAPI):
                     is_jvm=IS_JVM_PROJECT,
                     weighted_models=weighted_models,
                     priority=5,  # Lower priority than diff task
-                    num_repeat=1,
+                    num_repeat=1000000,  # Repeat until LLM budget exhausted
                 )
                 task_id = await engine.add_task(task)
                 logger.info(f"[LLM-TASK] AUTO-TRIGGER: Submitted LLM task for harness '{target_harness}' (task_id={task_id})")
@@ -393,7 +519,7 @@ async def lifespan(app: FastAPI):
                         harness_id=target_harness,
                         model=model,
                         priority=10,  # Higher priority for diff tasks
-                        num_repeat=1,
+                        num_repeat=1000000,  # Repeat until LLM budget exhausted
                     )
                     task_id = await engine.add_task(task)
                     logger.info(f"[LLM-TASK] AUTO-TRIGGER: Submitted diff task for harness '{target_harness}' (task_id={task_id})")
@@ -412,6 +538,12 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down service...")
+
+    # Stop budget checker first
+    if budget_checker:
+        budget_checker.stop()
+        logger.info("Budget checker stopped")
+
     if engine:
         try:
             await engine.__aexit__(None, None, None)
@@ -473,6 +605,19 @@ async def get_status():
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     ref_diff = project.ref_diff if project else None
+
+    # Get budget info from checker
+    budget_spend = None
+    budget_max = None
+    budget_remaining = None
+    budget_exhausted = False
+    if budget_checker:
+        budget_spend = budget_checker.last_spend
+        budget_max = budget_checker.last_max_budget
+        if budget_spend is not None and budget_max is not None:
+            budget_remaining = budget_max - budget_spend
+        budget_exhausted = budget_checker.budget_exhausted
+
     return ServiceStatus(
         running=True,
         default_harness_name=DEFAULT_HARNESS_NAME,
@@ -486,6 +631,10 @@ async def get_status():
         scripts_submitted=script_submission_count,
         llm_generations=llm_generation_count,
         workdir=str(engine.workdir) if engine and hasattr(engine, 'workdir') else str(Path(TEMPFS_DIR) / "deepgen_workdir"),
+        llm_budget_spend=budget_spend,
+        llm_budget_max=budget_max,
+        llm_budget_remaining=budget_remaining,
+        llm_budget_exhausted=budget_exhausted,
     )
 
 

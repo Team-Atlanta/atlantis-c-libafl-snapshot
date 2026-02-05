@@ -45,6 +45,7 @@ SCRIPT REQUIREMENTS:
 - Implement a function: `gen_one_seed() -> bytes` that returns a single fuzz input.
 - Ensure the generator is capable of producing millions of distinct, high-quality seeds.
 - Include necessary comments for better understanding the codes.
+- IMPORTANT: Do NOT use `from typing import bytes` - `bytes` is a builtin type in Python 3, not from typing.
 
 OUTPUT FORMAT:
 Wrap the full script between <script> and </script> tags, like this:
