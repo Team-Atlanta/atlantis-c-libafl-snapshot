@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+
+# Run existing build process
+python3.12 /crs/build.py
+
+# Change to root directory to avoid "getcwd: No such file or directory" errors
+# after directory moves in build.py
+cd /
+
+# Submit build outputs to libCRS
+libCRS submit-build-output /out libafl/build
+libCRS submit-build-output /data/artifacts libafl/artifacts
+libCRS submit-build-output /artifacts config

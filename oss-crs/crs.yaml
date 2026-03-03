@@ -1,0 +1,29 @@
+name: atlantis-c-libafl-snapshot
+type:
+  - bug-finding
+version: 1.0.0
+docker_registry: ghcr.io/team-atlanta/atlantis-c-libafl-snapshot
+
+target_build_phase:
+  - name: build
+    dockerfile: oss-crs/dockerfiles/builder.Dockerfile
+    outputs:
+      - libafl/build        # Fuzzer binaries from /out
+      - libafl/artifacts    # LibAFL runtime (libfuzzer.so, wrappers, libc++.a)
+      - config              # DeepGen config (config.json, project.tar.gz)
+
+crs_run_phase:
+  fuzzer:
+    dockerfile: oss-crs/dockerfiles/runner.Dockerfile
+
+supported_target:
+  mode:
+    - full
+    - delta
+  language:
+    - c
+    - c++
+  sanitizer:
+    - address
+  architecture:
+    - x86_64

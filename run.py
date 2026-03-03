@@ -758,7 +758,7 @@ def parse_cpuset(env_var_name='FUZZER_CPUS'):
     perspective. When Docker constrains to a cpuset (e.g., 9-11), the container
     still sees cores as 0, 1, 2 internally for affinity purposes.
 
-    Uses FUZZER_CPUS (set by start.sh) or falls back to CPUSET_CPUS.
+    Uses FUZZER_CPUS (set by start.sh) or falls back to OSS_CRS_CPUSET (oss-crs-6) or CPUSET_CPUS (legacy).
 
     Args:
         env_var_name: Name of the environment variable to parse
@@ -770,12 +770,22 @@ def parse_cpuset(env_var_name='FUZZER_CPUS'):
         ValueError: If the env var contains invalid characters
     """
     # FUZZER_CPUS is set by start.sh with the fuzzer's share of CPUs
-    # Fall back to CPUSET_CPUS for backwards compatibility
-    cpuset_str = os.getenv("FUZZER_CPUS") or os.getenv("CPUSET_CPUS", "0")
+    # Fall back to OSS_CRS_CPUSET (set by oss-crs-6) or CPUSET_CPUS (legacy)
+    cpuset_str = os.getenv("FUZZER_CPUS") or os.getenv("OSS_CRS_CPUSET") or os.getenv("CPUSET_CPUS", "0")
+
+    # Strip whitespace
+    cpuset_str = cpuset_str.strip()
+
+    # Handle empty string
+    if not cpuset_str:
+        cpuset_str = "0"
+
+    # Log for debugging
+    logging.info(f"parse_cpuset: cpuset_str='{cpuset_str}' (len={len(cpuset_str)})")
 
     # Assert only contains numbers and commas
     if not all(c.isdigit() or c == ',' for c in cpuset_str):
-        raise ValueError(f"{env_var_name} must only contain numbers and commas")
+        raise ValueError(f"FUZZER_CPUS must only contain numbers and commas, got: '{cpuset_str}' (chars: {[c for c in cpuset_str]})")
 
     # Count the number of cores specified
     num_cores = len(cpuset_str.split(','))
@@ -831,12 +841,14 @@ def run(harness):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("harness")
-    parser.add_argument("fuzzer_args", nargs="*")
-    args = parser.parse_args()
-    run(args.harness)
+    # Read harness from environment (set by bin/run_fuzzer)
+    harness = os.environ.get("HARNESS_NAME")
+    if not harness:
+        # Fallback to command-line arg for backward compatibility
+        parser = ArgumentParser()
+        parser.add_argument("harness")
+        parser.add_argument("fuzzer_args", nargs="*")
+        args = parser.parse_args()
+        harness = args.harness
 
-    # alternative interface with env vars
-    # harness = os.environ.get("FUZZER")
-    # run(harness)
+    run(harness)

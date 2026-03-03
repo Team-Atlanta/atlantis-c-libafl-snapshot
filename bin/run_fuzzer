@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+# Download build outputs from libCRS
+echo "Downloading build outputs..."
+libCRS download-build-output libafl/build /out
+libCRS download-build-output libafl/artifacts /data/artifacts
+libCRS download-build-output config /artifacts
+
+# Set up LD_LIBRARY_PATH for LibAFL
+export LD_LIBRARY_PATH="/data/artifacts:${LD_LIBRARY_PATH:-}"
+
+# Register output directories for auto-submission
+libCRS register-submit-dir pov /artifacts/povs
+libCRS register-submit-dir seed /artifacts/corpus
+
+# Ensure ZeroMQ IPC directory exists
+mkdir -p /tmp/ipc
+
+# Read harness from OSS_CRS_TARGET_HARNESS
+HARNESS_NAME="${OSS_CRS_TARGET_HARNESS}"
+if [ -z "$HARNESS_NAME" ]; then
+    echo "ERROR: OSS_CRS_TARGET_HARNESS not set"
+    exit 1
+fi
+
+export HARNESS_NAME
+
+# Delegate to start.sh for DeepGen + fuzzer orchestration
+exec /crs/start.sh "$HARNESS_NAME"

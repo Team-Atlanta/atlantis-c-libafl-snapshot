@@ -8,12 +8,19 @@ export PYTHONPATH="/crs:${PYTHONPATH:-}"
 
 # ============================================================================
 # LiteLLM API configuration
-# Export LITELLM_KEY as ANTHROPIC_API_KEY for litellm's anthropic provider
+# Map OSS_CRS variables (with fallback to old names for backward compatibility)
 # ============================================================================
-if [ -n "$LITELLM_KEY" ]; then
+if [ -n "$OSS_CRS_LLM_API_KEY" ]; then
+    export ANTHROPIC_API_KEY="$OSS_CRS_LLM_API_KEY"
+    export LITELLM_KEY="$OSS_CRS_LLM_API_KEY"
+elif [ -n "$LITELLM_KEY" ]; then
     export ANTHROPIC_API_KEY="$LITELLM_KEY"
 fi
-if [ -n "$LITELLM_URL" ]; then
+
+if [ -n "$OSS_CRS_LLM_API_URL" ]; then
+    export ANTHROPIC_BASE_URL="$OSS_CRS_LLM_API_URL"
+    export LITELLM_URL="$OSS_CRS_LLM_API_URL"
+elif [ -n "$LITELLM_URL" ]; then
     export ANTHROPIC_BASE_URL="$LITELLM_URL"
 fi
 
@@ -34,12 +41,38 @@ export HARNESS_NAME="${1:-${HARNESS_NAME:-}}"
 # - 2-3 cores: 1 for deepgen, rest for fuzzer
 # - 4+ cores: 2 for deepgen, rest for fuzzer
 # ============================================================================
-CPUSET_STR="${CPUSET_CPUS:-${CORES:-0}}"
+
+# Read cpuset from OSS_CRS_CPUSET (set by oss-crs-6)
+# Fall back to auto-detection from /proc/self/status if not set
+if [ -n "$OSS_CRS_CPUSET" ]; then
+    CPUSET_STR="$OSS_CRS_CPUSET"
+elif [ -n "$CPUSET_CPUS" ]; then
+    # Legacy fallback
+    CPUSET_STR="$CPUSET_CPUS"
+else
+    # Auto-detect from kernel
+    CPUSET_STR=$(grep "Cpus_allowed_list:" /proc/self/status 2>/dev/null | awk '{print $2}' || echo "0")
+fi
+
+# Final fallback to CORES if still not set
+CPUSET_STR="${CPUSET_STR:-${CORES:-0}}"
+
+# Strip surrounding quotes (single or double)
+CPUSET_STR=$(echo "$CPUSET_STR" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+
+# Convert range format (e.g., "2-5") to comma format (e.g., "2,3,4,5")
+if [[ "$CPUSET_STR" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+    START=${BASH_REMATCH[1]}
+    END=${BASH_REMATCH[2]}
+    CPUSET_STR=$(seq -s ',' $START $END)
+fi
+
 IFS=',' read -ra CPU_ARRAY <<< "$CPUSET_STR"
 NUM_CPUS=${#CPU_ARRAY[@]}
 
 echo "CPU allocation:"
 echo "  Total CPUs available: $NUM_CPUS (${CPUSET_STR})"
+echo "  CPU_ARRAY contents: ${CPU_ARRAY[*]}"
 
 if [ $NUM_CPUS -eq 1 ]; then
     # 1 core: fuzzer only
@@ -61,8 +94,12 @@ else
     echo "  Mode: 4+ cores - 2 deepgen, rest fuzzer"
 fi
 
+# Strip any whitespace from FUZZER_CPUS
+FUZZER_CPUS=$(echo "$FUZZER_CPUS" | tr -d ' ')
+
 echo "  DeepGen CPUs: ${DEEPGEN_CPUS:-none}"
-echo "  Fuzzer CPUs: $FUZZER_CPUS"
+echo "  Fuzzer CPUs: '$FUZZER_CPUS'"
+echo "  FUZZER_CPUS length: ${#FUZZER_CPUS}"
 
 # Export for child processes
 export DEEPGEN_CPUS

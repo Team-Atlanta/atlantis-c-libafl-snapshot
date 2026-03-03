@@ -128,8 +128,8 @@ class LiteLLMBudgetChecker:
         """
         self.check_interval = check_interval
         self.budget_margin = budget_margin
-        self.litellm_url = os.environ.get("LITELLM_URL", "")
-        self.litellm_key = os.environ.get("LITELLM_KEY", "")
+        self.litellm_url = os.environ.get("OSS_CRS_LLM_API_URL") or os.environ.get("LITELLM_URL", "")
+        self.litellm_key = os.environ.get("OSS_CRS_LLM_API_KEY") or os.environ.get("LITELLM_KEY", "")
         self.last_spend: Optional[float] = None
         self.last_max_budget: Optional[float] = None
         self.budget_exhausted = False
