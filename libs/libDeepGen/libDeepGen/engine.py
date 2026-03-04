@@ -59,9 +59,12 @@ class DeepGenEngine:
         self.scripts = {}
         self._script_lock = asyncio.Lock()
 
+        logger.info(f"[ENGINE-INIT] Step 1: Creating shm_label from {shm_label}")
         self.shm_label = str(uuid.uuid4())[0:8] if shm_label is None else shm_label
         self.script_pool_name = f'libDeepGen-seed-shmem-pool-{self.shm_label}'
+        logger.info(f"[ENGINE-INIT] Step 2: Creating ScriptShmemPoolProducer: {self.script_pool_name}")
         self.script_pool = ScriptShmemPoolProducer(shm_name=self.script_pool_name, create=True)
+        logger.info(f"[ENGINE-INIT] Step 2: ScriptShmemPoolProducer created successfully")
 
         logger.info(f"Using shmem name label: {self.shm_label}, passed arg is {shm_label}")
         
@@ -75,9 +78,12 @@ class DeepGenEngine:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
+        logger.info(f"[ENGINE-INIT] Step 3: Setting up workdir")
         self.workdir = Path(workdir) if workdir else Path.cwd() / "workdir-libDeepGen"
         self.workdir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"[ENGINE-INIT] Step 4: Creating TaskBoard at {self.workdir / 'task-board'}")
         self.task_board = TaskBoard(self.workdir / "task-board", task_para)
+        logger.info(f"[ENGINE-INIT] Step 4: TaskBoard created successfully")
 
         self.pre_alloc_exec = 500
         # By default, for each ExecProc, around 1GB mem usage:
@@ -88,10 +94,11 @@ class DeepGenEngine:
         # - stat_rb > 65536 * 4K = 256MB
         # - recycle_rb > 65536 * 4K = 256MB
         # - seed_pool => 65536 * 8K = 512MB
+        logger.info(f"[ENGINE-INIT] Step 5: Creating Executor with cores={core_ids}, seed_pool_size={seed_pool_size}")
         self.executor = Executor(
             shm_label=self.shm_label,
             script_pool_name=self.script_pool_name,
-            core_ids=core_ids, 
+            core_ids=core_ids,
             workdir=self.workdir / "executor",
             task_rb_size=((self.pre_alloc_exec + n_exec - 1) // n_exec),
             task_rb_slot_bytes=512,
@@ -103,14 +110,17 @@ class DeepGenEngine:
             seed_pool_size=seed_pool_size,
             n_exec=n_exec,
         )
+        logger.info(f"[ENGINE-INIT] Step 5: Executor created successfully")
 
         if submit_class is None or not issubclass(submit_class, SubmitBase):
             raise ValueError("submit_class must be a subclass of SubmitBase")
+        logger.info(f"[ENGINE-INIT] Step 6: Creating submit_class with proc_map")
         self.submit = submit_class(
             proc_map=self.executor.get_proc_map(),
             workdir=self.workdir / "submit",
             **(submit_kwargs if submit_kwargs else {}),
         )
+        logger.info(f"[ENGINE-INIT] Step 6: Submit created successfully")
 
     async def __aenter__(self):
         await self.submit.__aenter__()

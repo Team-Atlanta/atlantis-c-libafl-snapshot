@@ -353,25 +353,33 @@ class Executor:
         self._stop_evt: asyncio.Event | None = None
         self._wd_task: asyncio.Task | None = None
 
+        logger.info(f"[EXECUTOR-INIT] Creating resources for {len(core_ids)} cores: {core_ids}")
+        logger.info(f"[EXECUTOR-INIT] Seed pool config: item_size={seed_max_size}, item_num={seed_pool_size}, total_per_core={seed_max_size * seed_pool_size / 1024 / 1024:.1f}MB")
+
         for core_id in core_ids:
             proc_id = f"ExecProc-{shm_label}-{core_id}"
             task_rb_nm = f"task-rb-{shm_label}-{proc_id}"
             stat_rb_nm = f"stat-rb-{shm_label}-{proc_id}"
             recycle_rb_nm = f"recycle-rb-{shm_label}-{proc_id}"
             seed_pool_name = f"libDeepGen-exec-proc-seed-pool-{shm_label}-{proc_id}"
-            
+
+            logger.info(f"[EXECUTOR-INIT] Core {core_id}: Creating task ring buffer")
             self.proc_map[proc_id] = (recycle_rb_nm, seed_pool_name)
-            
+
             task_rb = RingBufferProducer(task_rb_nm, create=True, size=task_rb_size, bytes_per_slot=task_rb_slot_bytes)
+            logger.info(f"[EXECUTOR-INIT] Core {core_id}: Creating stat ring buffer")
             stat_rb = RingBufferConsumer(stat_rb_nm, create=True, size=stat_rb_size, bytes_per_slot=stat_rb_slot_bytes)
+            logger.info(f"[EXECUTOR-INIT] Core {core_id}: Creating recycle ring buffer")
             recycle_rb = RingBufferConsumer(recycle_rb_nm, create=True, size=recycle_rb_size, bytes_per_slot=recycle_rb_slot_bytes)
-            
+
+            logger.info(f"[EXECUTOR-INIT] Core {core_id}: Creating seed pool ({seed_max_size * seed_pool_size / 1024 / 1024:.1f}MB)")
             seed_pool_consumer = SeedShmemPoolConsumer(
-                shm_name=seed_pool_name, 
+                shm_name=seed_pool_name,
                 item_size=seed_max_size,
-                item_num=seed_pool_size, 
+                item_num=seed_pool_size,
                 create=True
             )
+            logger.info(f"[EXECUTOR-INIT] Core {core_id}: All resources created")
             
             def _make_proc(proc_id=proc_id, core_id=core_id,
                            task_rb_nm=task_rb_nm, stat_rb_nm=stat_rb_nm,
