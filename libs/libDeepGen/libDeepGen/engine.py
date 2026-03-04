@@ -36,15 +36,17 @@ class DeepGenEngine:
                  workdir: str | None = None,
                  submit_class: type[SubmitBase] | None = None,
                  submit_kwargs: dict | None = None,
-                 seed_max_size: int = 65536,
-                 seed_pool_size: int = 65536,
-                 n_exec: int = 100,
+                 seed_max_size: int = 2048,
+                 seed_pool_size: int = 128,
+                 n_exec: int = 50,
                  shm_label: str | None = None,
                  task_para: int = 4,
+                 script_max_size: int = 8192,
+                 script_pool_size: int = 64,
                  ):
         """
         Initialize the DeepGenEngine.
-        
+
         Args:
             core_ids: List of CPU core IDs to use for execution
             workdir: Working directory path
@@ -54,6 +56,8 @@ class DeepGenEngine:
             n_exec: Number of exec of script per scheduling
             shm_label: Shared memory label for IPC
             task_para: Number of parallel tasks for task board
+            script_max_size: Max size of each script in bytes (default: 16KB)
+            script_pool_size: Number of scripts in pool (default: 256)
         """
         # script id -> (mask_status, sched_cnt, script_id, script)
         self.scripts = {}
@@ -62,8 +66,15 @@ class DeepGenEngine:
         logger.info(f"[ENGINE-INIT] Step 1: Creating shm_label from {shm_label}")
         self.shm_label = str(uuid.uuid4())[0:8] if shm_label is None else shm_label
         self.script_pool_name = f'libDeepGen-seed-shmem-pool-{self.shm_label}'
-        logger.info(f"[ENGINE-INIT] Step 2: Creating ScriptShmemPoolProducer: {self.script_pool_name}")
-        self.script_pool = ScriptShmemPoolProducer(shm_name=self.script_pool_name, create=True)
+        script_pool_total_mb = (script_max_size * script_pool_size) / 1024 / 1024
+        logger.info(f"[ENGINE-INIT] Step 2: Creating ScriptShmemPoolProducer: {self.script_pool_name} "
+                    f"(item_size={script_max_size}, item_num={script_pool_size}, total={script_pool_total_mb:.1f}MB)")
+        self.script_pool = ScriptShmemPoolProducer(
+            shm_name=self.script_pool_name,
+            item_size=script_max_size,
+            item_num=script_pool_size,
+            create=True
+        )
         logger.info(f"[ENGINE-INIT] Step 2: ScriptShmemPoolProducer created successfully")
 
         logger.info(f"Using shmem name label: {self.shm_label}, passed arg is {shm_label}")
@@ -86,15 +97,24 @@ class DeepGenEngine:
         logger.info(f"[ENGINE-INIT] Step 4: TaskBoard created successfully")
 
         self.pre_alloc_exec = 500
-        # By default, for each ExecProc, around 1GB mem usage:
-        #  pre_alloc_exec = 500
-        #  n_exec = 100
-        #  seed_pool_size = 65536
-        # - task_rb => 4 * 500/100 * 0.5K = 10KB
-        # - stat_rb > 65536 * 4K = 256MB
-        # - recycle_rb > 65536 * 4K = 256MB
-        # - seed_pool => 65536 * 8K = 512MB
-        logger.info(f"[ENGINE-INIT] Step 5: Creating Executor with cores={core_ids}, seed_pool_size={seed_pool_size}")
+        # Memory budget per core (targeting <400KB per core for 128-core support in 64MB shm):
+        #  - task_rb: 6 slots × 512 bytes = 3KB
+        #  - stat_rb: 32 slots × ~700 bytes = ~22KB (buffering exec stats)
+        #  - recycle_rb: 32 slots × ~700 bytes = ~22KB (buffering recycle requests)
+        #  - seed_pool: seed_pool_size × seed_max_size (configured externally)
+        # Ring buffer slots only need to buffer in-flight messages, not all seeds
+        stat_rb_slots = min(32, seed_pool_size)  # Only need enough for buffering
+        stat_slot_bytes = 512 + 4 * n_exec  # Base overhead + seed_ids array
+        recycle_slot_bytes = 512 + 4 * n_exec  # Same structure
+
+        per_core_shm = (
+            6 * 512 +  # task_rb
+            stat_rb_slots * stat_slot_bytes +  # stat_rb
+            stat_rb_slots * recycle_slot_bytes +  # recycle_rb
+            seed_pool_size * seed_max_size  # seed_pool
+        )
+        logger.info(f"[ENGINE-INIT] Step 5: Creating Executor with cores={core_ids}, "
+                    f"per_core_shm={per_core_shm / 1024 / 1024:.2f}MB")
         self.executor = Executor(
             shm_label=self.shm_label,
             script_pool_name=self.script_pool_name,
@@ -102,10 +122,10 @@ class DeepGenEngine:
             workdir=self.workdir / "executor",
             task_rb_size=((self.pre_alloc_exec + n_exec - 1) // n_exec),
             task_rb_slot_bytes=512,
-            stat_rb_size=seed_pool_size,
-            stat_rb_slot_bytes=4096 + 4 * n_exec,
-            recycle_rb_size=seed_pool_size,
-            recycle_rb_slot_bytes=4096 + 4 * n_exec,
+            stat_rb_size=stat_rb_slots,
+            stat_rb_slot_bytes=stat_slot_bytes,
+            recycle_rb_size=stat_rb_slots,
+            recycle_rb_slot_bytes=recycle_slot_bytes,
             seed_max_size=seed_max_size,
             seed_pool_size=seed_pool_size,
             n_exec=n_exec,

@@ -35,13 +35,35 @@ None! The service can run with all defaults.
 - `SERVICE_PORT`: HTTP server port (default: `8000`)
 - `ENSEMBLER_TMPFS`: Temp directory (default: `/tmpfs`)
 
-### Advanced Engine Configuration
-- `SEED_MAX_SIZE`: Max seed size in bytes (default: `262144`)
-- `SEED_POOL_SIZE`: Seed pool size (default: `10000`)
-- `N_EXEC`: Executions per scheduling (default: `1000`)
+### Memory Configuration (fits in 64MB shm with up to 128 cores)
+- `SEED_MAX_SIZE`: Max seed size in bytes (default: `2048` = 2KB)
+- `SEED_POOL_SIZE`: Seeds per core (default: `128`)
+- `SCRIPT_MAX_SIZE`: Max script size in bytes (default: `8192` = 8KB)
+- `SCRIPT_POOL_SIZE`: Total scripts across all cores (default: `64`)
+- `N_EXEC`: Executions per scheduling (default: `50`)
+
+### Other Engine Configuration
 - `TASK_PARA`: Parallel tasks (default: `3`)
 - `DEALER_TIMEOUT`: Dealer timeout seconds (default: `60`)
 - `SEED_TIMEOUT`: Seed timeout seconds (default: `300`)
+
+### Memory Usage Estimates
+With defaults (~400KB per core + 512KB shared):
+- 1 core: 0.8MB
+- 8 cores: 2.9MB
+- 32 cores: 10MB
+- 64 cores: 19.5MB
+- 128 cores: 38.4MB
+
+To increase capacity (requires larger shm_size in Docker):
+```bash
+# For larger seeds and more pool capacity (needs shm_size: "2g")
+export SEED_MAX_SIZE=262144
+export SEED_POOL_SIZE=1000
+export SCRIPT_MAX_SIZE=65536
+export SCRIPT_POOL_SIZE=1024
+export N_EXEC=500
+```
 
 ## Running the Service
 

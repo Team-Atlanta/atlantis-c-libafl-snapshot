@@ -88,11 +88,15 @@ _cpuset_str = os.environ.get("DEEPGEN_CPUS") or os.environ.get("CPUSET_CPUS") or
 CORES = list(map(int, _cpuset_str.split(","))) if _cpuset_str else []
 SHM_LABEL = os.environ.get("SHM_LABEL", "dg_simple")
 # Reduced defaults to fit in Docker's default 64MB shm_size
-# 16KB * 1000 = 16MB per core, ~50MB total with 2 cores + overhead
-# Fit in 64MB: 8KB * 500 * 2 cores = 8MB seeds + ~20MB buffers = ~30MB
-SEED_MAX_SIZE = int(os.environ.get("SEED_MAX_SIZE", 8192))
-SEED_POOL_SIZE = int(os.environ.get("SEED_POOL_SIZE", 500))
-N_EXEC = int(os.environ.get("N_EXEC", 100))  # Reduced for 64MB shm
+# Memory budget for 64MB shm with up to 128 cores:
+#   Script pool: 8KB * 64 = 512KB
+#   Per core: ~400KB (seed pool + ring buffers)
+#   128 cores: 512KB + 128*400KB = ~51MB
+SEED_MAX_SIZE = int(os.environ.get("SEED_MAX_SIZE", 2048))  # 2KB per seed
+SEED_POOL_SIZE = int(os.environ.get("SEED_POOL_SIZE", 128))  # 128 seeds per core
+SCRIPT_MAX_SIZE = int(os.environ.get("SCRIPT_MAX_SIZE", 8192))  # 8KB per script
+SCRIPT_POOL_SIZE = int(os.environ.get("SCRIPT_POOL_SIZE", 64))  # 64 scripts total
+N_EXEC = int(os.environ.get("N_EXEC", 50))  # Executions per scheduling (affects ring buffer slot size)
 TASK_PARA = int(os.environ.get("TASK_PARA", 3))
 
 # ZeroMQ configuration
@@ -443,6 +447,16 @@ async def lifespan(app: FastAPI):
         ipc_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Created IPC directory: {ipc_dir}")
 
+        # Log estimated shm usage
+        num_cores = len(CORES[1:]) if len(CORES) > 1 else len(CORES)
+        script_pool_kb = (SCRIPT_MAX_SIZE * SCRIPT_POOL_SIZE) / 1024
+        rb_slots = min(32, SEED_POOL_SIZE)
+        per_core_kb = (SEED_MAX_SIZE * SEED_POOL_SIZE + rb_slots * 2 * (512 + 4 * N_EXEC)) / 1024
+        total_shm_mb = (script_pool_kb + num_cores * per_core_kb) / 1024
+        logger.info(f"[SHM-BUDGET] Script pool: {script_pool_kb:.0f}KB, "
+                    f"Per core: {per_core_kb:.0f}KB × {num_cores} = {num_cores * per_core_kb:.0f}KB, "
+                    f"Total estimate: {total_shm_mb:.1f}MB (64MB limit)")
+
         logger.info("Creating DeepGenEngine instance...")
         engine = DeepGenEngine(
             core_ids=CORES[1:] if len(CORES) > 1 else CORES,
@@ -454,6 +468,8 @@ async def lifespan(app: FastAPI):
             },
             seed_max_size=SEED_MAX_SIZE,
             seed_pool_size=SEED_POOL_SIZE,
+            script_max_size=SCRIPT_MAX_SIZE,
+            script_pool_size=SCRIPT_POOL_SIZE,
             n_exec=N_EXEC,
             task_para=TASK_PARA,
             shm_label=SHM_LABEL,

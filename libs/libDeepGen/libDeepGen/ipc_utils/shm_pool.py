@@ -107,9 +107,9 @@ class ShmemPoolBase(ABC):
 
 class ScriptShmemPoolBase(ShmemPoolBase):
     """Base class for script shared memory pool."""
-    # Pool size is 1GB -> 32K scripts X avg file size 32KB
-    SCRIPT_SIZE = 64 * 1024  # 64KB (4b for length field)
-    SCRIPT_NUM = 32768  # 32K scripts
+    # Default: 512KB pool (8KB × 64 scripts) - fits in 64MB shm with 128 cores
+    SCRIPT_SIZE = 8 * 1024  # 8KB per script
+    SCRIPT_NUM = 64  # 64 scripts
     
     def __init__(self, shm_name: str, item_num: int = SCRIPT_NUM, 
                  item_size: int = SCRIPT_SIZE, create: bool = False):
@@ -195,9 +195,9 @@ class ScriptShmemPoolConsumer(ScriptShmemPoolBase):
 
 class SeedShmemPoolBase(ShmemPoolBase):
     """Base class for seed shared memory pool."""
-    # Pool size is 0.5GB
-    SEED_SIZE = 8 * 1024  # 8KB
-    SEED_NUM = 65536  # 
+    # Default: 256KB pool (2KB × 128 seeds) - fits in 64MB shm with 128 cores
+    SEED_SIZE = 2 * 1024  # 2KB per seed
+    SEED_NUM = 128  # 128 seeds per core 
     
     def __init__(self, shm_name: str, item_num: int = SEED_NUM, 
                  item_size: int = SEED_SIZE, create: bool = False):

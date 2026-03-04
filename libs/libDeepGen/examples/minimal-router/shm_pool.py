@@ -105,9 +105,9 @@ class ShmemPoolBase(ABC):
 
 class SeedShmemPoolBase(ShmemPoolBase):
     """Base class for seed shared memory pool."""
-    # Pool size is 0.5GB
-    SEED_SIZE = 8 * 1024  # 8KB
-    SEED_NUM = 65536  # 
+    # Default: 256KB pool (2KB × 128 seeds) - fits in 64MB shm with 128 cores
+    SEED_SIZE = 2 * 1024  # 2KB per seed
+    SEED_NUM = 128  # 128 seeds per core 
     
     def __init__(self, shm_name: str, item_num: int = SEED_NUM, 
                  item_size: int = SEED_SIZE, create: bool = False):
