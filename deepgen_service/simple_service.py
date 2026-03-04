@@ -87,10 +87,10 @@ IS_JVM_PROJECT = os.environ.get("IS_JVM", "false").lower() == "true"
 _cpuset_str = os.environ.get("DEEPGEN_CPUS") or os.environ.get("CPUSET_CPUS") or os.environ.get("CORES", "1,2,3,4")
 CORES = list(map(int, _cpuset_str.split(","))) if _cpuset_str else []
 SHM_LABEL = os.environ.get("SHM_LABEL", "dg_simple")
-# Reduced defaults to fit in Docker's 2GB shm_size
-# 64KB * 2000 = 128MB per core, fits easily with 2 cores
-SEED_MAX_SIZE = int(os.environ.get("SEED_MAX_SIZE", 65536))
-SEED_POOL_SIZE = int(os.environ.get("SEED_POOL_SIZE", 2000))
+# Reduced defaults to fit in Docker's default 64MB shm_size
+# 16KB * 1000 = 16MB per core, ~50MB total with 2 cores + overhead
+SEED_MAX_SIZE = int(os.environ.get("SEED_MAX_SIZE", 16384))
+SEED_POOL_SIZE = int(os.environ.get("SEED_POOL_SIZE", 1000))
 N_EXEC = int(os.environ.get("N_EXEC", 1000))
 TASK_PARA = int(os.environ.get("TASK_PARA", 3))
 
