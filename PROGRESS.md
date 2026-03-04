@@ -1,7 +1,7 @@
 # atlantis-c-libafl-snapshot DeepGen Debugging Progress
 
 **Date:** 2026-03-03
-**Status:** ROOT CAUSE FOUND - shm_size too small
+**Status:** FIXED - shm_size and code-browser-server issues resolved
 
 ---
 
@@ -93,3 +93,16 @@ The oss-crs-6 template only sets `shm_size: "2g"` conditionally:
 For the runner container, this condition is FALSE, so it gets Docker's default 64MB.
 
 **The fix must ensure shm_size is set unconditionally for runner containers.**
+
+---
+
+## FIXES COMPLETED
+
+1. **shm_size** - Added `shm_size: "2g"` to oss-crs template (line 95)
+2. **code-browser-server** - Added startup in start.sh before DeepGen
+3. **Pool sizes** - Reduced to fit in 2GB (128MB per core)
+
+Rebuild and test:
+```bash
+cd ~/post/oss-crs-6 && uv run oss-crs prepare --compose-file example/atlantis-c-deepgen/compose2.yaml
+```
