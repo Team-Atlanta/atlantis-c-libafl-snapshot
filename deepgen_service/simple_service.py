@@ -438,7 +438,9 @@ async def lifespan(app: FastAPI):
         # Ensure IPC directory exists for ZMQ
         ipc_dir = Path("/tmp/ipc")
         ipc_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created IPC directory: {ipc_dir}")
 
+        logger.info("Creating DeepGenEngine instance...")
         engine = DeepGenEngine(
             core_ids=CORES[1:] if len(CORES) > 1 else CORES,
             submit_class=SeedCountingZeroMQSubmit,
@@ -454,8 +456,11 @@ async def lifespan(app: FastAPI):
             shm_label=SHM_LABEL,
             workdir=workdir,
         )
+        logger.info("DeepGenEngine instance created successfully")
 
+        logger.info("Entering DeepGenEngine context (await engine.__aenter__())...")
         await engine.__aenter__()
+        logger.info("DeepGenEngine.__aenter__() completed successfully")
         logger.info("DeepGenEngine initialized and ready")
 
         # Start engine in background with error handling
@@ -1078,12 +1083,17 @@ def run():
 
     logger.info(f"Starting FastAPI server on {SERVICE_HOST}:{SERVICE_PORT}")
 
-    uvicorn.run(
-        app,
-        host=SERVICE_HOST,
-        port=SERVICE_PORT,
-        log_level="info",
-    )
+    try:
+        uvicorn.run(
+            app,
+            host=SERVICE_HOST,
+            port=SERVICE_PORT,
+            log_level="info",
+        )
+        logger.info("uvicorn.run() completed normally")
+    except Exception as e:
+        logger.error(f"FATAL: uvicorn.run() crashed: {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
