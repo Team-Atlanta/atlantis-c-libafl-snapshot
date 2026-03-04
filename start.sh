@@ -113,6 +113,10 @@ echo "  Harness: $HARNESS_NAME"
 
 SERVICE_PID=""
 if [ "$SKIP_DEEPGEN" -eq 0 ]; then
+    # Start code-browser-server for LLM code navigation
+    code-browser-server &
+    echo "CodeBrowser server started"
+
     # Start the simple service in background
     python3.12 -m deepgen_service &
     SERVICE_PID=$!
