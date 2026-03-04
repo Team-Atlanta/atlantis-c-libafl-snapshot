@@ -89,9 +89,10 @@ CORES = list(map(int, _cpuset_str.split(","))) if _cpuset_str else []
 SHM_LABEL = os.environ.get("SHM_LABEL", "dg_simple")
 # Reduced defaults to fit in Docker's default 64MB shm_size
 # 16KB * 1000 = 16MB per core, ~50MB total with 2 cores + overhead
-SEED_MAX_SIZE = int(os.environ.get("SEED_MAX_SIZE", 16384))
-SEED_POOL_SIZE = int(os.environ.get("SEED_POOL_SIZE", 1000))
-N_EXEC = int(os.environ.get("N_EXEC", 1000))
+# Fit in 64MB: 8KB * 500 * 2 cores = 8MB seeds + ~20MB buffers = ~30MB
+SEED_MAX_SIZE = int(os.environ.get("SEED_MAX_SIZE", 8192))
+SEED_POOL_SIZE = int(os.environ.get("SEED_POOL_SIZE", 500))
+N_EXEC = int(os.environ.get("N_EXEC", 100))  # Reduced for 64MB shm
 TASK_PARA = int(os.environ.get("TASK_PARA", 3))
 
 # ZeroMQ configuration
