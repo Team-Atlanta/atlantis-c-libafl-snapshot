@@ -4,6 +4,9 @@ type:
 version: 1.0.0
 docker_registry: ghcr.io/team-atlanta/atlantis-c-libafl-snapshot
 
+prepare_phase:
+  hcl: oss-crs/docker-bake.hcl
+
 target_build_phase:
   - name: build
     dockerfile: oss-crs/dockerfiles/builder.Dockerfile
