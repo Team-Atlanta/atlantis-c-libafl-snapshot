@@ -10,6 +10,10 @@ export PYTHONPATH="/crs:${PYTHONPATH:-}"
 # LiteLLM API configuration
 # Map OSS_CRS variables (with fallback to old names for backward compatibility)
 # ============================================================================
+if [ -n "$OSS_CRS_LLM_API_KEY_FILE" ] && [ -f "$OSS_CRS_LLM_API_KEY_FILE" ]; then
+    OSS_CRS_LLM_API_KEY="$(cat "$OSS_CRS_LLM_API_KEY_FILE")"
+    export OSS_CRS_LLM_API_KEY
+fi
 if [ -n "$OSS_CRS_LLM_API_KEY" ]; then
     export ANTHROPIC_API_KEY="$OSS_CRS_LLM_API_KEY"
     export LITELLM_KEY="$OSS_CRS_LLM_API_KEY"
