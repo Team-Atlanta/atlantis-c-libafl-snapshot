@@ -7,8 +7,8 @@
 # run phases only copy pre-built artifacts.
 #
 # Build order (with parallelism):
-#   parallel:  libafl-toolchain ──► libafl-archive
-#              python-builder   ──► runner-base
+#   parallel:  atlantis-c-libafl-toolchain ──► atlantis-c-libafl-archive
+#              python-builder   ──► atlantis-c-runner-base
 #              rust-builder     ──┘
 #
 # Usage:
@@ -26,7 +26,7 @@ group "default" {
 }
 
 group "prepare" {
-  targets = ["libafl-archive", "runner-base"]
+  targets = ["atlantis-c-libafl-archive", "atlantis-c-runner-base"]
 }
 
 # -----------------------------------------------------------------------------
@@ -35,27 +35,27 @@ group "prepare" {
 
 # LibAFL toolchain: Ubuntu 20.04 + LLVM 18 + Rust + Python 3.12 + zlib
 # Compiles fuzzer (libfuzzer.so) and cc_wrapper/cxx_wrapper
-target "libafl-toolchain" {
+target "atlantis-c-libafl-toolchain" {
   context    = "."
   dockerfile = "oss-crs/dockerfiles/libafl-toolchain.Dockerfile"
-  tags       = ["libafl-toolchain:latest"]
+  tags       = ["atlantis-c-libafl-toolchain:latest"]
 }
 
 # Archive image: thin container with just the build artifacts
 # Extracts libfuzzer.so, cc_wrapper, cxx_wrapper, libc++.a, Python 3.12
-target "libafl-archive" {
+target "atlantis-c-libafl-archive" {
   context    = "."
   dockerfile = "oss-crs/dockerfiles/libafl-archive.Dockerfile"
-  tags       = ["libafl-archive:latest"]
+  tags       = ["atlantis-c-libafl-archive:latest"]
   contexts = {
-    libafl-toolchain = "target:libafl-toolchain"
+    atlantis-c-libafl-toolchain = "target:atlantis-c-libafl-toolchain"
   }
 }
 
 # Runner base: Python 3.12 + code-browser-server + all pip dependencies
 # Pre-installs everything the runner needs so runner.Dockerfile just COPYs
-target "runner-base" {
+target "atlantis-c-runner-base" {
   context    = "."
-  dockerfile = "oss-crs/dockerfiles/runner-base.Dockerfile"
-  tags       = ["runner-base:latest"]
+  dockerfile = "oss-crs/dockerfiles/atlantis-c-runner-base.Dockerfile"
+  tags       = ["atlantis-c-runner-base:latest"]
 }

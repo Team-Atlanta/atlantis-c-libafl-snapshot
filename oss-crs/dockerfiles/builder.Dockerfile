@@ -1,14 +1,14 @@
 # =============================================================================
 # CRS Builder Dockerfile
 # =============================================================================
-# BUILD phase: Uses pre-built artifacts from libafl-archive (prepare phase).
+# BUILD phase: Uses pre-built artifacts from atlantis-c-libafl-archive (prepare phase).
 # No Rust/LLVM compilation here — just copies artifacts and build scripts.
 # =============================================================================
 
 ARG target_base_image
 
 # Reference archive image from prepare phase
-FROM libafl-archive AS crs-tools
+FROM atlantis-c-libafl-archive AS crs-tools
 
 FROM ${target_base_image}
 
